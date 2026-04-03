@@ -13,7 +13,6 @@ import {
   BarChart2,
   CalendarIcon,
   Lock,
-  LockOpen,
   Printer,
   RotateCcw,
   ShieldAlert,
@@ -71,67 +70,40 @@ type CategoryDef = {
 };
 
 const CATEGORY_DEFS: CategoryDef[] = [
-  {
-    label: "Salad",
-    match: (n) => n.includes("salad bowl") && n.includes("baggase"),
-  },
+  { label: "Salad", match: (n) => n.includes("salad") },
   {
     label: "Bread",
-    match: (n) =>
-      n.includes("frozen italian white dough") ||
-      n.includes("frozen multi grain dough"),
+    match: (n) => n.includes("dough") || n.includes("tortilla"),
   },
   {
     label: "Ice Tea",
-    match: (n) =>
-      n.includes("iced green tea") &&
-      (n.includes("mint mojito") || n.includes("peach")),
+    match: (n) => n.includes("iced green tea") || n.includes("ice tea"),
   },
-  {
-    label: "Tortilla Wrap",
-    match: (n) =>
-      (n.includes("multigrain tortilla") || n.includes("spinach tortilla")) &&
-      n.includes("11.5"),
-  },
-  {
-    label: "Cookies",
-    match: (n) =>
-      n.includes("dark chunk cookie") ||
-      n.includes("double chunk cookie") ||
-      n.includes("oatmeal cookie"),
-  },
+  { label: "Cookies", match: (n) => n.includes("cookie") },
   {
     label: "Chips",
-    match: (n) =>
-      (n.includes("opera chips") && n.includes("salt")) ||
-      n.includes("assorted nachos"),
+    match: (n) => n.includes("chips") || n.includes("nachos"),
   },
   {
     label: "Coca-Cola Cans",
     match: (n) =>
-      (n.includes("coca-cola") && n.includes("330ml can")) ||
-      (n.includes("coke zero") && n.includes("330ml can")) ||
-      (n.includes("fanta") && n.includes("330ml can")) ||
-      (n.includes("thums up") && n.includes("330ml can")) ||
-      (n.includes("sprite") && n.includes("330ml can")),
+      n.includes("cola") ||
+      n.includes("coke") ||
+      n.includes("fanta") ||
+      n.includes("thums up") ||
+      n.includes("sprite"),
   },
   {
     label: "Water Bottles",
-    match: (n) => n.includes("schweppes") && n.includes("500ml"),
+    match: (n) =>
+      n.includes("schweppes") ||
+      (n.includes("water") && !n.includes("coconut")),
   },
-  {
-    label: "Mazza",
-    match: (n) => n.includes("maaza") && n.includes("300ml"),
-  },
-  {
-    label: "Minute Maid",
-    match: (n) => n.includes("minute maid pulpy orange") && n.includes("300ml"),
-  },
+  { label: "Mazza", match: (n) => n.includes("maaza") },
+  { label: "Minute Maid", match: (n) => n.includes("minute maid") },
   {
     label: "Raw Juice",
-    match: (n) =>
-      (n.includes("tender coconut water") && n.includes("200 ml")) ||
-      (n.includes("choco mint") && n.includes("milkshake")),
+    match: (n) => n.includes("coconut") || n.includes("milkshake"),
   },
 ];
 
@@ -176,10 +148,6 @@ export default function BPWSheet() {
   const [showAdminResetDialog, setShowAdminResetDialog] = useState(false);
   const [adminResetPassword, setAdminResetPassword] = useState("");
   const [adminResetPasswordError, setAdminResetPasswordError] = useState(false);
-  // Admin Edit state (unlock a closed/locked sheet)
-  const [showAdminEditDialog, setShowAdminEditDialog] = useState(false);
-  const [adminEditPassword, setAdminEditPassword] = useState("");
-  const [adminEditPasswordError, setAdminEditPasswordError] = useState(false);
   const [slicerOpen, setSlicerOpen] = useState(false);
   // Editable product names – persisted in localStorage
   const [productNames, setProductNames] = useState<string[]>(() =>
@@ -350,26 +318,6 @@ export default function BPWSheet() {
     toast.success("Admin Reset complete — entire day reset to zero");
   }, [sheet, adminResetPassword]);
 
-  // Admin Edit: unlock a closed/locked sheet for editing
-  const handleAdminEdit = useCallback(() => {
-    if (!sheet || !sheet.locked) return;
-
-    if (adminEditPassword !== "9924827787") {
-      setAdminEditPasswordError(true);
-      return;
-    }
-
-    const unlocked: DailySheet = { ...sheet, locked: false };
-    saveSheet(unlocked);
-    setSheet(unlocked);
-    setLockedDates(getLockedDates());
-    setShowAdminEditDialog(false);
-    setAdminEditPassword("");
-    setAdminEditPasswordError(false);
-
-    toast.success("Sheet unlocked for admin editing");
-  }, [sheet, adminEditPassword]);
-
   const computedRows = sheet ? sheet.rows.map(computeRow) : [];
   const categoryReport = buildCategoryReport(computedRows);
 
@@ -448,18 +396,6 @@ export default function BPWSheet() {
             <BarChart2 className="w-3.5 h-3.5" />
             Run Report
           </Button>
-          {sheet?.locked && (
-            <Button
-              data-ocid="sheet.admin_edit_button"
-              size="sm"
-              variant="outline"
-              onClick={() => setShowAdminEditDialog(true)}
-              className="h-8 text-xs gap-1.5 border-emerald-400/60 text-emerald-300 hover:bg-emerald-500/10 bg-transparent"
-            >
-              <LockOpen className="w-3.5 h-3.5" />
-              Admin Edit
-            </Button>
-          )}
           {!sheet?.locked && (
             <Button
               data-ocid="sheet.reset_button"
@@ -1034,83 +970,6 @@ export default function BPWSheet() {
             >
               <ShieldAlert className="w-4 h-4 mr-1.5" />
               Yes, Admin Reset
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      {/* Admin Edit Dialog — unlock a closed/locked sheet */}
-      <Dialog
-        open={showAdminEditDialog}
-        onOpenChange={(open) => {
-          setShowAdminEditDialog(open);
-          if (!open) {
-            setAdminEditPassword("");
-            setAdminEditPasswordError(false);
-          }
-        }}
-      >
-        <DialogContent data-ocid="admin_edit.dialog">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <LockOpen className="w-5 h-5 text-emerald-500" />
-              Admin Edit — Unlock Closed Sheet
-            </DialogTitle>
-            <DialogDescription className="pt-1">
-              This will <strong>unlock</strong> the closed sheet for{" "}
-              <strong>{formatLongDate(selectedDate)}</strong> and allow editing.
-              Enter the admin password to proceed.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-2">
-            <label
-              htmlFor="admin-edit-password-input"
-              className="block text-sm font-medium text-gray-700 mb-1"
-            >
-              Enter Admin Password
-            </label>
-            <input
-              id="admin-edit-password-input"
-              type="password"
-              value={adminEditPassword}
-              onChange={(e) => {
-                setAdminEditPassword(e.target.value);
-                setAdminEditPasswordError(false);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleAdminEdit();
-              }}
-              placeholder="Enter admin password"
-              className={`w-full border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 ${
-                adminEditPasswordError
-                  ? "border-red-500 bg-red-50"
-                  : "border-gray-300"
-              }`}
-            />
-            {adminEditPasswordError && (
-              <p className="text-red-500 text-xs mt-1">
-                Incorrect admin password. Please try again.
-              </p>
-            )}
-          </div>
-          <DialogFooter className="gap-2">
-            <Button
-              data-ocid="admin_edit.cancel_button"
-              variant="outline"
-              onClick={() => {
-                setShowAdminEditDialog(false);
-                setAdminEditPassword("");
-                setAdminEditPasswordError(false);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              data-ocid="admin_edit.confirm_button"
-              onClick={handleAdminEdit}
-              className="bg-emerald-500 hover:bg-emerald-600 text-white"
-            >
-              <LockOpen className="w-4 h-4 mr-1.5" />
-              Unlock for Editing
             </Button>
           </DialogFooter>
         </DialogContent>
