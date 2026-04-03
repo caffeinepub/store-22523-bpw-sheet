@@ -110,8 +110,16 @@ input[type="number"] {
   -moz-appearance: textfield;
 }
 
-/* Print styles */
+/* ============================================================
+   PRINT STYLES — A4 Landscape, compact 13-column sheet
+   ============================================================ */
 @media print {
+  /* Force A4 landscape for ALL print jobs */
+  @page {
+    size: A4 landscape;
+    margin: 8mm 10mm;
+  }
+
   .no-print {
     display: none !important;
   }
@@ -121,46 +129,132 @@ input[type="number"] {
 
   body {
     background: white !important;
-    font-size: 10px;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
+    margin: 0;
+    padding: 0;
   }
 
-  /* Full width on print */
+  /* The app container should not clip */
+  #root,
+  .h-screen {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Header and footer hidden */
+  header,
+  footer {
+    display: none !important;
+  }
+
+  /* Main area: no padding, no overflow clipping */
   main {
     overflow: visible !important;
     padding: 0 !important;
+    flex: none !important;
+    width: 100% !important;
   }
 
+  /* The flex layout wrapper must not clip */
+  .flex.flex-col {
+    display: block !important;
+  }
+
+  /* Table wrapper: must not scroll, fill full width */
   .bpw-table-wrap {
+    overflow: visible !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  /* The outer overflow-x-auto wrapper */
+  [data-ocid="sheet.table"] {
     overflow: visible !important;
     width: 100% !important;
   }
 
+  /* Make table scale to fit page width */
   .bpw-table {
     width: 100% !important;
-    font-size: 8px !important;
+    table-layout: fixed !important;
+    font-size: 7px !important;
     border-collapse: collapse !important;
   }
 
   .bpw-table th,
   .bpw-table td {
     padding: 2px 3px !important;
-    border: 1px solid #ccc !important;
+    border: 0.5pt solid #bbb !important;
+    word-break: break-word !important;
+    white-space: normal !important;
+    overflow: hidden !important;
+  }
+
+  /* Product name column: slightly wider */
+  .bpw-table th:first-child,
+  .bpw-table td:first-child,
+  .bpw-table th:nth-child(11),
+  .bpw-table td:nth-child(11) {
+    width: 14% !important;
+    font-size: 6.5px !important;
+  }
+
+  /* Numeric columns: equal narrow width */
+  .bpw-table th:not(:first-child):not(:nth-child(11)),
+  .bpw-table td:not(:first-child):not(:nth-child(11)) {
+    width: 6.5% !important;
   }
 
   .bpw-table input {
     border: none !important;
     background: transparent !important;
-    font-size: 8px !important;
+    font-size: 7px !important;
     text-align: center;
     width: 100% !important;
+    padding: 0 !important;
   }
 
-  /* Page break settings */
-  @page {
-    size: A4 landscape;
-    margin: 1cm;
+  .bpw-edit-btn {
+    display: none !important;
+  }
+
+  /* When downloading report PDF only — hide sheet table, keep report */
+  body.print-report-only .no-print,
+  body.print-report-only header,
+  body.print-report-only footer {
+    display: none !important;
+  }
+
+  body.print-report-only [data-ocid="sheet.table"] {
+    display: none !important;
+  }
+
+  body.print-report-only .print-only {
+    display: none !important;
+  }
+
+  body.print-report-only #finalized-report-section {
+    border: none !important;
+    margin-top: 0 !important;
+  }
+
+  body.print-report-only #finalized-report-section .no-print {
+    display: none !important;
+  }
+
+  /* Finalized report table print styles */
+  #finalized-report-section table {
+    width: 60% !important;
+    font-size: 9px !important;
+    border-collapse: collapse !important;
+    margin: 0 auto !important;
+  }
+
+  #finalized-report-section table th,
+  #finalized-report-section table td {
+    padding: 4px 8px !important;
+    border: 0.5pt solid #bbb !important;
   }
 }
 

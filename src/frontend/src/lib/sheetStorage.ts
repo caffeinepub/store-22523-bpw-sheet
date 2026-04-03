@@ -64,10 +64,17 @@ export interface ProductRow {
   posCount: number; // manual
 }
 
+export interface FinalizedReportRow {
+  label: string;
+  variance: number;
+  status: "Excess" | "Short" | "Tally";
+}
+
 export interface DailySheet {
   date: string; // YYYY-MM-DD
   rows: ProductRow[];
   locked: boolean;
+  finalizedReport?: FinalizedReportRow[]; // saved when day is closed via Run Report
 }
 
 /** Build a blank row for a product */

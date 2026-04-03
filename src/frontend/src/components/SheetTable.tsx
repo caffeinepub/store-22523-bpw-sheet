@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { Check, Pencil, X } from "lucide-react";
+import { Check, LayoutList, Pencil, X } from "lucide-react";
 import { useRef, useState } from "react";
 import type { ComputedRow } from "../lib/calculations";
 import type { ProductRow } from "../lib/sheetStorage";
@@ -17,6 +17,8 @@ interface SheetTableProps {
     value: string,
   ) => void;
   onProductNameChange: (idx: number, newName: string) => void;
+  onOpenDeliveryWindow?: () => void;
+  onOpenTransferWindow?: () => void;
 }
 
 const COL_HEADERS = [
@@ -137,7 +139,7 @@ function EditableProductName({
         <button
           type="button"
           onClick={confirm}
-          className="shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-success/20 text-success"
+          className="bpw-edit-btn shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-success/20 text-success"
           title="Save"
         >
           <Check className="w-3 h-3" />
@@ -145,7 +147,7 @@ function EditableProductName({
         <button
           type="button"
           onClick={cancel}
-          className="shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-destructive/20 text-destructive"
+          className="bpw-edit-btn shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-destructive/20 text-destructive"
           title="Cancel"
         >
           <X className="w-3 h-3" />
@@ -162,7 +164,7 @@ function EditableProductName({
       <button
         type="button"
         onClick={startEdit}
-        className="shrink-0 opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-opacity"
+        className="bpw-edit-btn shrink-0 opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-opacity"
         title="Edit product name"
       >
         <Pencil className="w-3 h-3" />
@@ -177,6 +179,8 @@ export default function SheetTable({
   productNames,
   onCellChange,
   onProductNameChange,
+  onOpenDeliveryWindow,
+  onOpenTransferWindow,
 }: SheetTableProps) {
   if (computedRows.length === 0) return null;
 
@@ -196,44 +200,121 @@ export default function SheetTable({
   const totalVariance = computedRows.reduce((s, r) => s + r.variance, 0);
 
   return (
-    <div className="overflow-x-auto" data-ocid="sheet.table">
+    <div className="overflow-x-auto w-full" data-ocid="sheet.table">
       <style>{`
-        @media print {
-          .bpw-table-wrap { overflow: visible; }
-          .bpw-table { font-size: 9px !important; }
-          .bpw-table th, .bpw-table td { padding: 3px 4px !important; }
-          .bpw-table input { border: none !important; background: transparent !important; font-size: 9px; }
-          .bpw-edit-btn { display: none !important; }
-        }
         .bpw-table input[type=number]::-webkit-outer-spin-button,
         .bpw-table input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
         .bpw-table input[type=number] { -moz-appearance: textfield; }
       `}</style>
-      <div className="bpw-table-wrap min-w-max">
+      <div className="bpw-table-wrap min-w-max w-full">
         <table className="bpw-table border-collapse text-[12px] w-full">
           <thead>
             <tr>
-              {COL_HEADERS.map((col, i) => (
-                <th
-                  // biome-ignore lint/suspicious/noArrayIndexKey: fixed column headers
-                  key={i}
-                  className={cn(
-                    "px-2 py-2 text-[10px] font-bold uppercase tracking-wide border border-border text-foreground/80 whitespace-nowrap",
-                    col.align,
-                    col.width,
-                    MANUAL_COL_INDICES.includes(i)
-                      ? "bg-blue-50"
-                      : "bg-table-header",
-                  )}
-                >
-                  {col.label}
-                  {MANUAL_COL_INDICES.includes(i) && (
-                    <span className="block text-[8px] font-normal normal-case tracking-normal text-info opacity-70">
-                      manual
-                    </span>
-                  )}
-                </th>
-              ))}
+              {COL_HEADERS.map((col, i) => {
+                // Special header for Delivery column (index 2)
+                if (i === 2) {
+                  return (
+                    <th
+                      // biome-ignore lint/suspicious/noArrayIndexKey: fixed column headers
+                      key={i}
+                      className={cn(
+                        "px-2 py-2 text-[10px] font-bold uppercase tracking-wide border border-border text-foreground/80 whitespace-nowrap",
+                        col.align,
+                        col.width,
+                        "bg-blue-50",
+                      )}
+                    >
+                      <div className="flex items-center justify-center gap-1">
+                        <span>{col.label}</span>
+                        <button
+                          type="button"
+                          data-ocid="delivery.open_modal_button"
+                          onClick={onOpenDeliveryWindow}
+                          title={
+                            locked
+                              ? "View delivery entries (read-only)"
+                              : "Open Delivery Entry Window"
+                          }
+                          className={cn(
+                            "w-4 h-4 flex items-center justify-center rounded transition-colors",
+                            locked
+                              ? "text-muted-foreground/50 cursor-default"
+                              : "text-blue-600 hover:bg-blue-100 hover:text-blue-800 cursor-pointer",
+                          )}
+                        >
+                          <LayoutList className="w-3 h-3" />
+                        </button>
+                      </div>
+                      <span className="block text-[8px] font-normal normal-case tracking-normal text-info opacity-70">
+                        manual
+                      </span>
+                    </th>
+                  );
+                }
+
+                // Special header for Transfer column (index 3)
+                if (i === 3) {
+                  return (
+                    <th
+                      // biome-ignore lint/suspicious/noArrayIndexKey: fixed column headers
+                      key={i}
+                      className={cn(
+                        "px-2 py-2 text-[10px] font-bold uppercase tracking-wide border border-border text-foreground/80 whitespace-nowrap",
+                        col.align,
+                        col.width,
+                        "bg-blue-50",
+                      )}
+                    >
+                      <div className="flex items-center justify-center gap-1">
+                        <span>{col.label}</span>
+                        <button
+                          type="button"
+                          data-ocid="transfer.open_modal_button"
+                          onClick={onOpenTransferWindow}
+                          title={
+                            locked
+                              ? "View transfer entries (read-only)"
+                              : "Open Transfer Entry Window"
+                          }
+                          className={cn(
+                            "w-4 h-4 flex items-center justify-center rounded transition-colors",
+                            locked
+                              ? "text-muted-foreground/50 cursor-default"
+                              : "text-blue-600 hover:bg-blue-100 hover:text-blue-800 cursor-pointer",
+                          )}
+                        >
+                          <LayoutList className="w-3 h-3" />
+                        </button>
+                      </div>
+                      <span className="block text-[8px] font-normal normal-case tracking-normal text-info opacity-70">
+                        manual
+                      </span>
+                    </th>
+                  );
+                }
+
+                return (
+                  <th
+                    // biome-ignore lint/suspicious/noArrayIndexKey: fixed column headers
+                    key={i}
+                    className={cn(
+                      "px-2 py-2 text-[10px] font-bold uppercase tracking-wide border border-border text-foreground/80 whitespace-nowrap",
+                      col.align,
+                      col.width,
+                      MANUAL_COL_INDICES.includes(i)
+                        ? "bg-blue-50"
+                        : "bg-table-header",
+                    )}
+                  >
+                    {col.label}
+                    {MANUAL_COL_INDICES.includes(i) && (
+                      <span className="block text-[8px] font-normal normal-case tracking-normal text-info opacity-70">
+                        manual
+                      </span>
+                    )}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>

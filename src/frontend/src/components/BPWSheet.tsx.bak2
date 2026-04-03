@@ -12,9 +12,6 @@ import { cn } from "@/lib/utils";
 import {
   BarChart2,
   CalendarIcon,
-  ClipboardList,
-  Download,
-  LayoutList,
   Lock,
   LockOpen,
   Printer,
@@ -29,14 +26,11 @@ import { toast } from "sonner";
 import { computeRow } from "../lib/calculations";
 import {
   type DailySheet,
-  type FinalizedReportRow,
   type ProductRow,
   calcStoreClosing,
-  calcTotalBA,
   calcTotalCounter,
   getAllSheetDates,
   getLockedDates,
-  getMostRecentLockedSheet,
   getOrCreateSheet,
   loadProductNames,
   saveProductNames,
@@ -196,14 +190,6 @@ export default function BPWSheet() {
   const [runReportStage, setRunReportStage] = useState<"report" | "finalize">(
     "report",
   );
-  // Default Qty Set state
-  const [showDefaultQtyDialog, setShowDefaultQtyDialog] = useState(false);
-  // Delivery Window state
-  const [showDeliveryWindow, setShowDeliveryWindow] = useState(false);
-  const [deliveryDraft, setDeliveryDraft] = useState<number[]>([]);
-  // Transfer Window state
-  const [showTransferWindow, setShowTransferWindow] = useState(false);
-  const [transferDraft, setTransferDraft] = useState<number[]>([]);
 
   // Load sheet when date changes
   useEffect(() => {
@@ -268,15 +254,8 @@ export default function BPWSheet() {
   const handleCloseDay = useCallback(() => {
     if (!sheet || sheet.locked) return;
 
-    // Lock the sheet — save finalized report at close time
-    const report: FinalizedReportRow[] = buildCategoryReport(
-      sheet.rows.map(computeRow),
-    );
-    const locked: DailySheet = {
-      ...sheet,
-      locked: true,
-      finalizedReport: report,
-    };
+    // Lock the sheet
+    const locked: DailySheet = { ...sheet, locked: true };
     saveSheet(locked);
     setSheet(locked);
 
@@ -328,7 +307,6 @@ export default function BPWSheet() {
       ...row,
       physical: 0,
       additional: 0,
-      posCount: 0,
     }));
 
     const resetSheet: DailySheet = { ...sheet, rows: resetRows };
@@ -338,7 +316,7 @@ export default function BPWSheet() {
     setResetPassword("");
     setResetPasswordError(false);
 
-    toast.success("Physical, Additional & POS Count values reset successfully");
+    toast.success("Physical & Additional values reset successfully");
   }, [sheet, resetPassword]);
 
   // Admin Reset: resets entire current open day to zero (all columns)
@@ -391,84 +369,6 @@ export default function BPWSheet() {
 
     toast.success("Sheet unlocked for admin editing");
   }, [sheet, adminEditPassword]);
-
-  // Default Qty Set: restore Opening & Open Counter from previous closed day's Total BA & Total Counter
-  const handleDefaultQtySet = useCallback(() => {
-    if (!sheet) return;
-    const prev = getMostRecentLockedSheet(selectedDate);
-    if (!prev) {
-      toast.error("No previous closed day found to restore quantities from.");
-      return;
-    }
-    const updatedRows = sheet.rows.map((row, idx) => {
-      const prevRow = prev.rows[idx];
-      if (!prevRow) return row;
-      const prevTotalBA = calcTotalBA(prevRow);
-      const prevTotalCounter = calcTotalCounter(prevRow);
-      return { ...row, opening: prevTotalBA, openCounter: prevTotalCounter };
-    });
-    const updated: DailySheet = { ...sheet, rows: updatedRows };
-    saveSheet(updated);
-    setSheet(updated);
-    setShowDefaultQtyDialog(false);
-    toast.success(
-      "Opening & Open Counter restored from previous day's Total BA & Total Counter.",
-    );
-  }, [sheet, selectedDate]);
-
-  const handleDownloadReportPDF = useCallback(() => {
-    document.body.classList.add("print-report-only");
-    window.print();
-    document.body.classList.remove("print-report-only");
-  }, []);
-
-  // Open Delivery Window: capture current delivery values as draft
-  const openDeliveryWindow = useCallback(() => {
-    if (!sheet) return;
-    setDeliveryDraft(sheet.rows.map((r) => r.delivery));
-    setShowDeliveryWindow(true);
-  }, [sheet]);
-
-  // Open Transfer Window: capture current transfer values as draft
-  const openTransferWindow = useCallback(() => {
-    if (!sheet) return;
-    setTransferDraft(sheet.rows.map((r) => r.transfer));
-    setShowTransferWindow(true);
-  }, [sheet]);
-
-  // Save Delivery Window entries to sheet state
-  const saveDeliveryWindow = useCallback(() => {
-    if (!sheet || sheet.locked) return;
-    setSheet((prev) => {
-      if (!prev) return prev;
-      const newRows = prev.rows.map((row, i) => ({
-        ...row,
-        delivery: deliveryDraft[i] ?? row.delivery,
-      }));
-      const updated: DailySheet = { ...prev, rows: newRows };
-      saveSheet(updated);
-      return updated;
-    });
-    setShowDeliveryWindow(false);
-    toast.success("Delivery quantities saved");
-  }, [sheet, deliveryDraft]);
-
-  // Save Transfer Window entries to sheet state
-  const saveTransferWindow = useCallback(() => {
-    if (!sheet || sheet.locked) return;
-    setSheet((prev) => {
-      if (!prev) return prev;
-      const newRows = prev.rows.map((row, i) => ({
-        ...row,
-        transfer: transferDraft[i] ?? row.transfer,
-      }));
-      const updated: DailySheet = { ...prev, rows: newRows };
-      saveSheet(updated);
-      return updated;
-    });
-    setShowTransferWindow(false);
-    toast.success("Transfer quantities saved");
-  }, [sheet, transferDraft]);
 
   const computedRows = sheet ? sheet.rows.map(computeRow) : [];
   const categoryReport = buildCategoryReport(computedRows);
@@ -547,17 +447,6 @@ export default function BPWSheet() {
           >
             <BarChart2 className="w-3.5 h-3.5" />
             Run Report
-          </Button>
-          {/* Default Qty Set — always visible */}
-          <Button
-            data-ocid="sheet.default_qty_set_button"
-            size="sm"
-            variant="outline"
-            onClick={() => setShowDefaultQtyDialog(true)}
-            className="h-8 text-xs gap-1.5 border-teal-400/60 text-teal-300 hover:bg-teal-500/10 bg-transparent"
-          >
-            <ClipboardList className="w-3.5 h-3.5" />
-            Default Qty Set
           </Button>
           {sheet?.locked && (
             <Button
@@ -750,8 +639,6 @@ export default function BPWSheet() {
               productNames={productNames}
               onCellChange={handleCellChange}
               onProductNameChange={handleProductNameChange}
-              onOpenDeliveryWindow={openDeliveryWindow}
-              onOpenTransferWindow={openTransferWindow}
             />
           ) : (
             <div
@@ -761,110 +648,6 @@ export default function BPWSheet() {
               Loading sheet...
             </div>
           )}
-
-          {/* ─── Finalized Report Section ─── */}
-          {sheet?.locked &&
-            sheet?.finalizedReport &&
-            sheet.finalizedReport.length > 0 && (
-              <div
-                id="finalized-report-section"
-                className="mt-8 border border-border rounded-lg overflow-hidden"
-              >
-                {/* Header row with title + action buttons */}
-                <div className="no-print flex items-center justify-between px-4 py-3 bg-indigo-50 border-b border-indigo-200">
-                  <div className="flex items-center gap-2">
-                    <BarChart2 className="w-4 h-4 text-indigo-600" />
-                    <span className="font-bold text-sm text-indigo-800">
-                      Category Report — {formatLongDate(selectedDate)}
-                    </span>
-                    <span className="text-xs text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded-full">
-                      Finalized
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      data-ocid="finalized_report.print_button"
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs gap-1"
-                      onClick={() => window.print()}
-                    >
-                      <Printer className="w-3 h-3" /> Print
-                    </Button>
-                    <Button
-                      data-ocid="finalized_report.download_button"
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs gap-1"
-                      onClick={handleDownloadReportPDF}
-                    >
-                      <Download className="w-3 h-3" /> Download PDF
-                    </Button>
-                  </div>
-                </div>
-                {/* Print-only header for this section */}
-                <div className="print-only px-4 py-3 border-b border-gray-200">
-                  <h3 className="font-bold text-base">
-                    Category Report — {formatLongDate(selectedDate)}
-                  </h3>
-                  <p className="text-xs text-gray-500">
-                    Store 22523 · BPW Daily Sheet · Finalized
-                  </p>
-                </div>
-                {/* Report table */}
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-muted/60">
-                      <th className="px-4 py-2.5 text-left font-semibold text-foreground text-xs uppercase tracking-wide">
-                        Categories
-                      </th>
-                      <th className="px-4 py-2.5 text-center font-semibold text-foreground text-xs uppercase tracking-wide">
-                        Variance (+/−)
-                      </th>
-                      <th className="px-4 py-2.5 text-center font-semibold text-foreground text-xs uppercase tracking-wide">
-                        Status
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {sheet.finalizedReport.map((row) => (
-                      <tr key={row.label} className="hover:bg-muted/30">
-                        <td className="px-4 py-2 font-medium text-foreground">
-                          {row.label}
-                        </td>
-                        <td
-                          className={cn(
-                            "px-4 py-2 text-center font-mono font-semibold",
-                            row.variance < 0
-                              ? "text-red-600"
-                              : row.variance > 0
-                                ? "text-amber-600"
-                                : "text-green-600",
-                          )}
-                        >
-                          {formatVariance(row.variance)}
-                        </td>
-                        <td className="px-4 py-2 text-center">
-                          <span
-                            className={cn(
-                              "inline-block px-2.5 py-0.5 rounded-full text-xs font-bold",
-                              row.status === "Excess" &&
-                                "bg-red-100 text-red-700",
-                              row.status === "Short" &&
-                                "bg-amber-100 text-amber-700",
-                              row.status === "Tally" &&
-                                "bg-green-100 text-green-700",
-                            )}
-                          >
-                            {row.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
         </main>
       </div>
 
@@ -1112,12 +895,12 @@ export default function BPWSheet() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <RotateCcw className="w-5 h-5 text-red-500" />
-              Reset Physical, Additional &amp; POS Count?
+              Reset Physical &amp; Additional?
             </DialogTitle>
             <DialogDescription className="pt-1">
-              This will clear <strong>Physical</strong>,{" "}
-              <strong>Additional</strong>, and <strong>POS Count</strong> values
-              for <strong>{formatLongDate(selectedDate)}</strong>. This{" "}
+              This will clear <strong>Physical</strong> and{" "}
+              <strong>Additional</strong> values for{" "}
+              <strong>{formatLongDate(selectedDate)}</strong>. This{" "}
               <strong>cannot be undone</strong>.
             </DialogDescription>
           </DialogHeader>
@@ -1255,7 +1038,6 @@ export default function BPWSheet() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
       {/* Admin Edit Dialog — unlock a closed/locked sheet */}
       <Dialog
         open={showAdminEditDialog}
@@ -1330,253 +1112,6 @@ export default function BPWSheet() {
               <LockOpen className="w-4 h-4 mr-1.5" />
               Unlock for Editing
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Default Qty Set Dialog */}
-      <Dialog
-        open={showDefaultQtyDialog}
-        onOpenChange={setShowDefaultQtyDialog}
-      >
-        <DialogContent data-ocid="default_qty.dialog">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ClipboardList className="w-5 h-5 text-teal-500" />
-              Default Qty Set — Restore from Previous Day?
-            </DialogTitle>
-            <DialogDescription className="pt-1">
-              This will set <strong>Opening</strong> and{" "}
-              <strong>Open Counter</strong> for{" "}
-              <strong>{formatLongDate(selectedDate)}</strong> using the{" "}
-              <strong>Total BA</strong> and <strong>Total Counter</strong>{" "}
-              values from the previous closed day. All other columns (Delivery,
-              Transfer, Physical, Additional, POS Count) will remain unchanged.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setShowDefaultQtyDialog(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              data-ocid="default_qty.confirm_button"
-              onClick={handleDefaultQtySet}
-              className="bg-teal-500 hover:bg-teal-600 text-white"
-            >
-              <ClipboardList className="w-4 h-4 mr-1.5" />
-              Yes, Set Default Qty
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ─── Delivery Window Dialog ─── */}
-      <Dialog
-        open={showDeliveryWindow}
-        onOpenChange={(open) => setShowDeliveryWindow(open)}
-      >
-        <DialogContent data-ocid="delivery.dialog" className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <LayoutList className="w-5 h-5 text-blue-500" />
-              Delivery Entry — {formatLongDate(selectedDate)}
-            </DialogTitle>
-            <DialogDescription>
-              Enter delivery quantities for each product.
-            </DialogDescription>
-          </DialogHeader>
-
-          {sheet?.locked && (
-            <div className="flex items-center gap-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
-              <Lock className="w-3.5 h-3.5 shrink-0" />
-              Day is closed. Open with Admin Edit to make changes.
-            </div>
-          )}
-
-          <ScrollArea className="max-h-[60vh]">
-            <div className="pr-3">
-              {productNames.map((name, idx) => (
-                <div
-                  key={name}
-                  data-ocid={`delivery.item.${idx + 1}`}
-                  className={cn(
-                    "flex items-center justify-between gap-3 px-3 py-2 rounded",
-                    idx % 2 === 0 ? "bg-muted/30" : "bg-transparent",
-                  )}
-                >
-                  <span className="text-sm text-foreground flex-1 min-w-0 leading-tight">
-                    {name}
-                  </span>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="0"
-                    disabled={sheet?.locked ?? true}
-                    value={
-                      deliveryDraft[idx] === 0 ? "" : (deliveryDraft[idx] ?? "")
-                    }
-                    onChange={(e) => {
-                      const val = Math.max(
-                        0,
-                        Number.parseFloat(e.target.value) || 0,
-                      );
-                      setDeliveryDraft((prev) => {
-                        const next = [...prev];
-                        next[idx] = val;
-                        return next;
-                      });
-                    }}
-                    style={
-                      { MozAppearance: "textfield" } as React.CSSProperties
-                    }
-                    className={cn(
-                      "min-w-[80px] w-20 h-8 text-center text-sm font-mono border border-input rounded px-2 bg-background",
-                      "focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary",
-                      "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
-                      (sheet?.locked ?? true) &&
-                        "bg-muted/40 cursor-not-allowed text-muted-foreground border-border",
-                    )}
-                  />
-                </div>
-              ))}
-            </div>
-          </ScrollArea>
-
-          <DialogFooter className="gap-2">
-            {sheet?.locked ? (
-              <Button
-                data-ocid="delivery.close_button"
-                variant="outline"
-                onClick={() => setShowDeliveryWindow(false)}
-              >
-                Close
-              </Button>
-            ) : (
-              <>
-                <Button
-                  data-ocid="delivery.cancel_button"
-                  variant="outline"
-                  onClick={() => setShowDeliveryWindow(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  data-ocid="delivery.save_button"
-                  onClick={saveDeliveryWindow}
-                  className="bg-blue-600 hover:bg-blue-700 text-white"
-                >
-                  <LayoutList className="w-4 h-4 mr-1.5" />
-                  Save Delivery
-                </Button>
-              </>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ─── Transfer Window Dialog ─── */}
-      <Dialog
-        open={showTransferWindow}
-        onOpenChange={(open) => setShowTransferWindow(open)}
-      >
-        <DialogContent data-ocid="transfer.dialog" className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <LayoutList className="w-5 h-5 text-purple-500" />
-              Transfer Entry — {formatLongDate(selectedDate)}
-            </DialogTitle>
-            <DialogDescription>
-              Enter transfer quantities for each product.
-            </DialogDescription>
-          </DialogHeader>
-
-          {sheet?.locked && (
-            <div className="flex items-center gap-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
-              <Lock className="w-3.5 h-3.5 shrink-0" />
-              Day is closed. Open with Admin Edit to make changes.
-            </div>
-          )}
-
-          <ScrollArea className="max-h-[60vh]">
-            <div className="pr-3">
-              {productNames.map((name, idx) => (
-                <div
-                  key={name}
-                  data-ocid={`transfer.item.${idx + 1}`}
-                  className={cn(
-                    "flex items-center justify-between gap-3 px-3 py-2 rounded",
-                    idx % 2 === 0 ? "bg-muted/30" : "bg-transparent",
-                  )}
-                >
-                  <span className="text-sm text-foreground flex-1 min-w-0 leading-tight">
-                    {name}
-                  </span>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="0"
-                    disabled={sheet?.locked ?? true}
-                    value={
-                      transferDraft[idx] === 0 ? "" : (transferDraft[idx] ?? "")
-                    }
-                    onChange={(e) => {
-                      const val = Math.max(
-                        0,
-                        Number.parseFloat(e.target.value) || 0,
-                      );
-                      setTransferDraft((prev) => {
-                        const next = [...prev];
-                        next[idx] = val;
-                        return next;
-                      });
-                    }}
-                    style={
-                      { MozAppearance: "textfield" } as React.CSSProperties
-                    }
-                    className={cn(
-                      "min-w-[80px] w-20 h-8 text-center text-sm font-mono border border-input rounded px-2 bg-background",
-                      "focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary",
-                      "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
-                      (sheet?.locked ?? true) &&
-                        "bg-muted/40 cursor-not-allowed text-muted-foreground border-border",
-                    )}
-                  />
-                </div>
-              ))}
-            </div>
-          </ScrollArea>
-
-          <DialogFooter className="gap-2">
-            {sheet?.locked ? (
-              <Button
-                data-ocid="transfer.close_button"
-                variant="outline"
-                onClick={() => setShowTransferWindow(false)}
-              >
-                Close
-              </Button>
-            ) : (
-              <>
-                <Button
-                  data-ocid="transfer.cancel_button"
-                  variant="outline"
-                  onClick={() => setShowTransferWindow(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  data-ocid="transfer.save_button"
-                  onClick={saveTransferWindow}
-                  className="bg-purple-600 hover:bg-purple-700 text-white"
-                >
-                  <LayoutList className="w-4 h-4 mr-1.5" />
-                  Save Transfer
-                </Button>
-              </>
-            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
