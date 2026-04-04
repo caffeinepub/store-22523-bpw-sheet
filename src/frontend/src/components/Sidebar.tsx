@@ -6,8 +6,13 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  FileUp,
+  Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { toast } from "sonner";
+import type { ParsedCSVTemplate } from "../lib/storeClosingReport";
+import { parseCSVTemplate } from "../lib/storeClosingReport";
 import {
   dateToString,
   formatDisplayDate,
@@ -20,6 +25,8 @@ interface SidebarProps {
   selectedDate: string;
   onDateSelect: (date: string) => void;
   closedDates: string[];
+  csvTemplate: ParsedCSVTemplate | null;
+  onCSVTemplateChange: (template: ParsedCSVTemplate | null) => void;
 }
 
 const WEEKDAY_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -28,6 +35,8 @@ export default function Sidebar({
   selectedDate,
   onDateSelect,
   closedDates,
+  csvTemplate,
+  onCSVTemplateChange,
 }: SidebarProps) {
   const today = new Date();
   const todayStr = dateToString(today);
@@ -39,6 +48,8 @@ export default function Sidebar({
   const [calMonth, setCalMonth] = useState<number>(() =>
     selectedDateObj.getMonth(),
   );
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const daysInMonth = getDaysInMonth(calYear, calMonth);
   const firstDayOfWeek = getFirstDayOfMonth(calYear, calMonth);
@@ -75,6 +86,39 @@ export default function Sidebar({
   for (let d = 1; d <= daysInMonth; d++) dayCells.push(d);
 
   const sortedClosedDates = [...closedDates].sort((a, b) => b.localeCompare(a));
+
+  // Handle CSV template file upload
+  const handleTemplateUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.name.endsWith(".csv")) {
+      toast.error("Please upload a .csv file");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const parsed = parseCSVTemplate(text);
+      if (!parsed) {
+        toast.error(
+          "Could not read the CSV template. Make sure it has a header row and at least one data row.",
+        );
+        return;
+      }
+      onCSVTemplateChange(parsed);
+      toast.success(
+        `Template loaded: ${parsed.headers.length} columns, ${parsed.rows.length} products`,
+      );
+    };
+    reader.readAsText(file);
+    // Reset input so the same file can be re-uploaded
+    e.target.value = "";
+  };
+
+  const handleRemoveTemplate = () => {
+    onCSVTemplateChange(null);
+    toast.success("Template removed. Downloads will use the built-in format.");
+  };
 
   return (
     <aside className="w-[300px] shrink-0 flex flex-col gap-4 no-print">
@@ -173,6 +217,101 @@ export default function Sidebar({
             <div className="w-3 h-3 rounded-full border-2 border-info" />
             <span className="text-[10px] text-muted-foreground">Today</span>
           </div>
+        </div>
+      </div>
+
+      {/* CSV Report Template Upload */}
+      <div className="bg-card border border-border rounded-lg shadow-card overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
+          <FileUp className="w-4 h-4 text-primary" />
+          <span className="font-semibold text-sm text-foreground">
+            Report Template
+          </span>
+          {csvTemplate && (
+            <Badge
+              className="ml-auto text-[10px] bg-emerald-100 text-emerald-700 border-emerald-300"
+              variant="outline"
+            >
+              Active
+            </Badge>
+          )}
+        </div>
+
+        <div className="px-4 py-3 flex flex-col gap-3">
+          {csvTemplate ? (
+            <>
+              <div className="bg-emerald-50 border border-emerald-200 rounded-md px-3 py-2">
+                <p className="text-xs font-medium text-emerald-800 mb-0.5">
+                  Template loaded
+                </p>
+                <p className="text-[11px] text-emerald-600">
+                  {csvTemplate.headers.length} columns &bull;{" "}
+                  {csvTemplate.rows.length} products
+                </p>
+                <p className="text-[11px] text-emerald-600 mt-0.5">
+                  Name col:{" "}
+                  <span className="font-semibold">
+                    {csvTemplate.nameColumn}
+                  </span>
+                </p>
+                <p className="text-[11px] text-emerald-600">
+                  Qty col:{" "}
+                  <span className="font-semibold">
+                    {csvTemplate.quantityColumn}
+                  </span>
+                </p>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Downloads will use your template format. Quantity is filled from
+                Store Closing.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium py-1.5 px-3 rounded-md border border-emerald-400 text-emerald-700 hover:bg-emerald-50 transition-colors"
+                >
+                  <FileUp className="w-3 h-3" />
+                  Replace
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRemoveTemplate}
+                  className="flex items-center justify-center gap-1.5 text-xs font-medium py-1.5 px-3 rounded-md border border-red-300 text-red-600 hover:bg-red-50 transition-colors"
+                  title="Remove template"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Upload your system's CSV template here. The app will use its
+                column structure and static data for all future downloads — only
+                the <span className="font-semibold">QUANTITY</span> column will
+                be updated from Store Closing.
+              </p>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full flex items-center justify-center gap-2 text-xs font-semibold py-2 px-4 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white transition-colors"
+              >
+                <FileUp className="w-3.5 h-3.5" />
+                Upload CSV Template
+              </button>
+              <p className="text-[10px] text-muted-foreground text-center">
+                Accepts .csv files only
+              </p>
+            </>
+          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv"
+            className="hidden"
+            onChange={handleTemplateUpload}
+          />
         </div>
       </div>
 

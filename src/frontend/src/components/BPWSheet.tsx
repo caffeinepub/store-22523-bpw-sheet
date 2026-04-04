@@ -14,6 +14,8 @@ import {
   CalendarIcon,
   ClipboardList,
   Download,
+  FileSpreadsheet,
+  FileUp,
   LayoutList,
   Lock,
   LockOpen,
@@ -49,6 +51,11 @@ import {
   calcTotalBA,
   calcTotalCounter,
 } from "../lib/sheetStorage";
+import {
+  type ParsedCSVTemplate,
+  downloadStoreClosingReport,
+  parseCSVTemplate,
+} from "../lib/storeClosingReport";
 import CalendarPanel from "./CalendarPanel";
 import SheetTable from "./SheetTable";
 
@@ -237,6 +244,10 @@ export default function BPWSheet() {
   // POS Count Window state
   const [showPosCountWindow, setShowPosCountWindow] = useState(false);
   const [posCountDraft, setPosCountDraft] = useState<number[]>([]);
+  const [csvTemplate, setCsvTemplate] = useState<ParsedCSVTemplate | null>(
+    null,
+  );
+  const csvFileInputRef = useRef<HTMLInputElement | null>(null);
   // Negative entry reason prompt state
   const [pendingReason, setPendingReason] = useState<{
     type: "delivery" | "transfer";
@@ -721,6 +732,17 @@ export default function BPWSheet() {
     document.body.classList.remove("print-report-only");
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sheet dep covers computedRows
+  const handleDownloadStoreClosingReport = useCallback(() => {
+    if (!sheet) {
+      toast.error("No sheet data available to download.");
+      return;
+    }
+    const rows = sheet.rows.map(computeRow);
+    downloadStoreClosingReport(rows, selectedDate, csvTemplate);
+    toast.success("Store Closing Report downloaded");
+  }, [sheet, selectedDate]);
+
   // Open Delivery Window: populate 3-cell draft from existing deliveryCells or delivery value
   const openDeliveryWindow = useCallback(() => {
     if (!sheet) return;
@@ -1151,6 +1173,16 @@ export default function BPWSheet() {
             <Printer className="w-3.5 h-3.5" />
             Print
           </Button>
+          <Button
+            data-ocid="sheet.download_store_closing_button"
+            size="sm"
+            onClick={handleDownloadStoreClosingReport}
+            className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white border-0"
+            title="Download Store Closing Report as CSV"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            Download Report
+          </Button>
           {/* Run Report — always visible */}
           <Button
             data-ocid="sheet.run_report_button"
@@ -1322,6 +1354,102 @@ export default function BPWSheet() {
                     </p>
                   </div>
                 )}
+
+                {/* CSV Report Template Upload */}
+                <div className="bg-card border border-border rounded-lg overflow-hidden mt-1">
+                  <div className="px-3 py-2 border-b border-border bg-muted/30 flex items-center gap-1.5">
+                    <FileUp className="w-3 h-3 text-primary" />
+                    <span className="text-[10px] font-bold text-foreground uppercase tracking-wide">
+                      Report Template
+                    </span>
+                    {csvTemplate && (
+                      <span className="ml-auto text-[9px] font-semibold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
+                        Active
+                      </span>
+                    )}
+                  </div>
+                  <div className="px-3 py-2 flex flex-col gap-2">
+                    {csvTemplate ? (
+                      <>
+                        <p className="text-[10px] text-emerald-700 font-medium">
+                          Template loaded ({csvTemplate.rows.length} products)
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          Downloads use your CSV format. Only QUANTITY is
+                          updated from Store Closing.
+                        </p>
+                        <div className="flex gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => csvFileInputRef.current?.click()}
+                            className="flex-1 text-[10px] font-semibold py-1 px-2 rounded border border-emerald-400 text-emerald-700 hover:bg-emerald-50 transition-colors flex items-center justify-center gap-1"
+                          >
+                            <FileUp className="w-2.5 h-2.5" /> Replace
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCsvTemplate(null);
+                              toast.success("Template removed");
+                            }}
+                            className="text-[10px] font-semibold py-1 px-2 rounded border border-red-300 text-red-600 hover:bg-red-50 transition-colors"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-[10px] text-muted-foreground leading-relaxed">
+                          Upload your system's CSV template. The app will use
+                          its format — only QUANTITY will be updated from Store
+                          Closing.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => csvFileInputRef.current?.click()}
+                          className="w-full text-[10px] font-semibold py-1.5 px-3 rounded bg-emerald-600 hover:bg-emerald-700 text-white transition-colors flex items-center justify-center gap-1.5"
+                        >
+                          <FileUp className="w-3 h-3" /> Upload CSV Template
+                        </button>
+                        <p className="text-[10px] text-muted-foreground text-center">
+                          .csv files only
+                        </p>
+                      </>
+                    )}
+                    <input
+                      ref={csvFileInputRef}
+                      type="file"
+                      accept=".csv"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        if (!file.name.endsWith(".csv")) {
+                          toast.error("Please upload a .csv file");
+                          return;
+                        }
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                          const text = ev.target?.result as string;
+                          const parsed = parseCSVTemplate(text);
+                          if (!parsed) {
+                            toast.error(
+                              "Could not read the CSV template. Ensure it has a header row and data rows.",
+                            );
+                            return;
+                          }
+                          setCsvTemplate(parsed);
+                          toast.success(
+                            `Template loaded: ${parsed.headers.length} columns, ${parsed.rows.length} products`,
+                          );
+                        };
+                        reader.readAsText(file);
+                        e.target.value = "";
+                      }}
+                    />
+                  </div>
+                </div>
               </motion.aside>
             </>
           )}
