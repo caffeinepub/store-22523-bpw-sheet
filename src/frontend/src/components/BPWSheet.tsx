@@ -18,8 +18,11 @@ import {
   Lock,
   LockOpen,
   Printer,
+  Receipt,
   RotateCcw,
+  Scale,
   ShieldAlert,
+  Truck,
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -31,6 +34,7 @@ import {
   getOrCreateSheetFromBackend,
   loadAllSheetsFromBackend,
   loadProductNamesFromBackend,
+  loadSheetFromBackend,
   saveProductNamesToBackend,
   saveSheetToBackend,
 } from "../lib/backendStorage";
@@ -227,6 +231,12 @@ export default function BPWSheet() {
   const [transferDraft, setTransferDraft] = useState<
     [number, number, number][]
   >([]);
+  // Physical Window state
+  const [showPhysicalWindow, setShowPhysicalWindow] = useState(false);
+  const [physicalDraft, setPhysicalDraft] = useState<number[]>([]);
+  // POS Count Window state
+  const [showPosCountWindow, setShowPosCountWindow] = useState(false);
+  const [posCountDraft, setPosCountDraft] = useState<number[]>([]);
   // Negative entry reason prompt state
   const [pendingReason, setPendingReason] = useState<{
     type: "delivery" | "transfer";
@@ -309,6 +319,53 @@ export default function BPWSheet() {
     };
   }, [selectedDate, actor, actorFetching]);
 
+  // Track whether a save is in progress so polling doesn't overwrite it
+  const isSavingRef = useRef(false);
+
+  // Guarded save: sets isSavingRef around every canister write so live polling
+  // doesn't overwrite a save that is currently in flight.
+  // Stored in a ref so it is always stable and never needs to appear in dep arrays.
+  const guardedSaveRef = useRef(
+    async (
+      actorArg: Parameters<typeof saveSheetToBackend>[0],
+      sheetArg: Parameters<typeof saveSheetToBackend>[1],
+    ) => {
+      isSavingRef.current = true;
+      try {
+        await saveSheetToBackend(actorArg, sheetArg);
+      } finally {
+        isSavingRef.current = false;
+      }
+    },
+  );
+  const guardedSave = guardedSaveRef.current;
+
+  // Poll canister every 15 s for the current date's sheet so all devices stay in sync.
+  // Skips the update if a save is currently in flight to avoid overwriting in-progress entries.
+  useEffect(() => {
+    if (!actor) return;
+    const POLL_INTERVAL = 15_000; // 15 seconds
+    const timer = setInterval(async () => {
+      if (isSavingRef.current) return; // skip if user is mid-save
+      try {
+        const remote = await loadSheetFromBackend(actor, selectedDate);
+        if (!remote) return;
+        setSheet((prev) => {
+          if (!prev) return remote;
+          // Only update if remote version actually differs (simple JSON compare)
+          if (JSON.stringify(prev) !== JSON.stringify(remote)) {
+            return remote;
+          }
+          return prev;
+        });
+        setSyncStatus("live");
+      } catch {
+        // silent — don't disturb the user on poll failure
+      }
+    }, POLL_INTERVAL);
+    return () => clearInterval(timer);
+  }, [actor, selectedDate]);
+
   // Helper to refresh allDates and lockedDates from backend
   const refreshDatesFromBackend = useCallback(async () => {
     if (!actor) return;
@@ -326,6 +383,7 @@ export default function BPWSheet() {
     setSlicerOpen(false);
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: guardedSave is a stable ref wrapper, not a reactive dep
   const handleProductNameChange = useCallback(
     async (idx: number, newName: string) => {
       const updatedNames = productNames.map((n, i) =>
@@ -357,7 +415,7 @@ export default function BPWSheet() {
         const updated: DailySheet = { ...sheet, rows: newRows };
         try {
           if (actor) {
-            await saveSheetToBackend(actor, updated);
+            await guardedSave(actor, updated);
           }
         } catch (err) {
           console.error("Failed to save sheet:", err);
@@ -380,6 +438,7 @@ export default function BPWSheet() {
     [actor, productNames, sheet],
   );
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: guardedSave is a stable ref wrapper, not a reactive dep
   const handleCellChange = useCallback(
     async (
       idx: number,
@@ -398,7 +457,7 @@ export default function BPWSheet() {
       setSheet(updated);
       try {
         if (actor) {
-          await saveSheetToBackend(actor, updated);
+          await guardedSave(actor, updated);
         }
         setSyncStatus("live");
       } catch (err) {
@@ -410,6 +469,7 @@ export default function BPWSheet() {
     [sheet, actor],
   );
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: guardedSave is a stable ref wrapper, not a reactive dep
   const handleCloseDay = useCallback(async () => {
     if (!sheet || sheet.locked) return;
 
@@ -424,7 +484,7 @@ export default function BPWSheet() {
     };
     try {
       if (actor) {
-        await saveSheetToBackend(actor, locked);
+        await guardedSave(actor, locked);
       }
     } catch (err) {
       console.error("Failed to save locked sheet:", err);
@@ -462,7 +522,7 @@ export default function BPWSheet() {
     };
     try {
       if (actor) {
-        await saveSheetToBackend(actor, nextSheet);
+        await guardedSave(actor, nextSheet);
       }
     } catch (err) {
       console.error("Failed to save next day sheet:", err);
@@ -480,6 +540,7 @@ export default function BPWSheet() {
     );
   }, [sheet, selectedDate, actor, refreshDatesFromBackend]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: guardedSave is a stable ref wrapper, not a reactive dep
   const handleResetDay = useCallback(async () => {
     if (!sheet || sheet.locked) return;
 
@@ -498,7 +559,7 @@ export default function BPWSheet() {
     const resetSheet: DailySheet = { ...sheet, rows: resetRows };
     try {
       if (actor) {
-        await saveSheetToBackend(actor, resetSheet);
+        await guardedSave(actor, resetSheet);
       }
       setSyncStatus("live");
     } catch (err) {
@@ -517,6 +578,7 @@ export default function BPWSheet() {
   }, [sheet, resetPassword, actor]);
 
   // Admin Reset: resets entire current open day to zero (all columns)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: guardedSave is a stable ref wrapper, not a reactive dep
   const handleAdminReset = useCallback(async () => {
     if (!sheet || sheet.locked) return;
 
@@ -542,7 +604,7 @@ export default function BPWSheet() {
     const resetSheet: DailySheet = { ...sheet, rows: zeroRows };
     try {
       if (actor) {
-        await saveSheetToBackend(actor, resetSheet);
+        await guardedSave(actor, resetSheet);
       }
       setSyncStatus("live");
     } catch (err) {
@@ -557,6 +619,7 @@ export default function BPWSheet() {
   }, [sheet, adminResetPassword, actor]);
 
   // Admin Edit: unlock a closed/locked sheet for editing
+  // biome-ignore lint/correctness/useExhaustiveDependencies: guardedSave is a stable ref wrapper, not a reactive dep
   const handleAdminEdit = useCallback(async () => {
     if (!sheet || !sheet.locked) return;
 
@@ -568,7 +631,7 @@ export default function BPWSheet() {
     const unlocked: DailySheet = { ...sheet, locked: false };
     try {
       if (actor) {
-        await saveSheetToBackend(actor, unlocked);
+        await guardedSave(actor, unlocked);
       }
       setSyncStatus("live");
     } catch (err) {
@@ -586,6 +649,7 @@ export default function BPWSheet() {
   }, [sheet, adminEditPassword, actor, refreshDatesFromBackend]);
 
   // Default Qty Set: restore Opening & Open Counter from previous closed day's Total BA & Total Counter
+  // biome-ignore lint/correctness/useExhaustiveDependencies: guardedSave is a stable ref wrapper, not a reactive dep
   const handleDefaultQtySet = useCallback(async () => {
     if (!sheet) return;
     let prev: DailySheet | null;
@@ -612,7 +676,7 @@ export default function BPWSheet() {
     const updated: DailySheet = { ...sheet, rows: updatedRows };
     try {
       if (actor) {
-        await saveSheetToBackend(actor, updated);
+        await guardedSave(actor, updated);
       }
       setSyncStatus("live");
     } catch (err) {
@@ -675,6 +739,20 @@ export default function BPWSheet() {
     setShowTransferWindow(true);
   }, [sheet]);
 
+  // Open Physical Window: populate single-cell draft from existing physical value
+  const openPhysicalWindow = useCallback(() => {
+    if (!sheet) return;
+    setPhysicalDraft(sheet.rows.map((r) => r.physical));
+    setShowPhysicalWindow(true);
+  }, [sheet]);
+
+  // Open POS Count Window: populate single-cell draft from existing posCount value
+  const openPosCountWindow = useCallback(() => {
+    if (!sheet) return;
+    setPosCountDraft(sheet.rows.map((r) => r.posCount));
+    setShowPosCountWindow(true);
+  }, [sheet]);
+
   // Helper: build negativeEntries list from current draft + reasons
   const buildNegativeEntries = useCallback(
     (
@@ -706,6 +784,7 @@ export default function BPWSheet() {
   );
 
   // Save Delivery Window entries: sum 3 cells, store total + cells + reasons
+  // biome-ignore lint/correctness/useExhaustiveDependencies: guardedSave is a stable ref wrapper, not a reactive dep
   const saveDeliveryWindow = useCallback(async () => {
     if (!sheet || sheet.locked) return;
     const newRows = sheet.rows.map((row, i) => {
@@ -739,7 +818,7 @@ export default function BPWSheet() {
     };
     try {
       if (actor) {
-        await saveSheetToBackend(actor, updated);
+        await guardedSave(actor, updated);
       }
       setSyncStatus("live");
     } catch (err) {
@@ -754,6 +833,7 @@ export default function BPWSheet() {
   }, [sheet, deliveryDraft, draftReasons, buildNegativeEntries, actor]);
 
   // Save Transfer Window entries: sum 3 cells, store total + cells + reasons
+  // biome-ignore lint/correctness/useExhaustiveDependencies: guardedSave is a stable ref wrapper, not a reactive dep
   const saveTransferWindow = useCallback(async () => {
     if (!sheet || sheet.locked) return;
     const newRows = sheet.rows.map((row, i) => {
@@ -787,7 +867,7 @@ export default function BPWSheet() {
     };
     try {
       if (actor) {
-        await saveSheetToBackend(actor, updated);
+        await guardedSave(actor, updated);
       }
       setSyncStatus("live");
     } catch (err) {
@@ -800,6 +880,50 @@ export default function BPWSheet() {
     setDraftReasons({});
     toast.success("Transfer quantities saved");
   }, [sheet, transferDraft, draftReasons, buildNegativeEntries, actor]);
+
+  // Save Physical Window entries: single cell value
+  // biome-ignore lint/correctness/useExhaustiveDependencies: guardedSave is a stable ref wrapper, not a reactive dep
+  const savePhysicalWindow = useCallback(async () => {
+    if (!sheet || sheet.locked) return;
+    const newRows = sheet.rows.map((row, i) => {
+      const val = physicalDraft[i] ?? row.physical;
+      return { ...row, physical: val };
+    });
+    const updated: DailySheet = { ...sheet, rows: newRows };
+    try {
+      if (actor) await guardedSave(actor, updated);
+      setSyncStatus("live");
+    } catch (err) {
+      console.error("Failed to save physical entries:", err);
+      setSyncStatus("offline");
+      toast.error("Save failed. Please check your connection and try again.");
+    }
+    setSheet(updated);
+    setShowPhysicalWindow(false);
+    toast.success("Physical quantities saved");
+  }, [sheet, physicalDraft, actor]);
+
+  // Save POS Count Window entries: single cell value
+  // biome-ignore lint/correctness/useExhaustiveDependencies: guardedSave is a stable ref wrapper, not a reactive dep
+  const savePosCountWindow = useCallback(async () => {
+    if (!sheet || sheet.locked) return;
+    const newRows = sheet.rows.map((row, i) => {
+      const val = posCountDraft[i] ?? row.posCount;
+      return { ...row, posCount: val };
+    });
+    const updated: DailySheet = { ...sheet, rows: newRows };
+    try {
+      if (actor) await guardedSave(actor, updated);
+      setSyncStatus("live");
+    } catch (err) {
+      console.error("Failed to save POS count entries:", err);
+      setSyncStatus("offline");
+      toast.error("Save failed. Please check your connection and try again.");
+    }
+    setSheet(updated);
+    setShowPosCountWindow(false);
+    toast.success("POS Count saved");
+  }, [sheet, posCountDraft, actor]);
 
   const computedRows = sheet ? sheet.rows.map(computeRow) : [];
   const categoryReport = buildCategoryReport(computedRows);
@@ -934,6 +1058,65 @@ export default function BPWSheet() {
 
         {/* Right: actions */}
         <div className="flex items-center gap-2 shrink-0">
+          {/* Window Buttons — always visible, solid colored */}
+          <Button
+            data-ocid="delivery.open_modal_button"
+            size="sm"
+            onClick={openDeliveryWindow}
+            className="h-8 text-xs gap-1.5 bg-blue-600 hover:bg-blue-700 text-white border-0"
+            title={
+              sheet?.locked
+                ? "View delivery entries (read-only)"
+                : "Open Delivery Entry Window"
+            }
+          >
+            <Truck className="w-3.5 h-3.5" />
+            Delivery
+          </Button>
+          <Button
+            data-ocid="transfer.open_modal_button"
+            size="sm"
+            onClick={openTransferWindow}
+            className="h-8 text-xs gap-1.5 bg-purple-600 hover:bg-purple-700 text-white border-0"
+            title={
+              sheet?.locked
+                ? "View transfer entries (read-only)"
+                : "Open Transfer Entry Window"
+            }
+          >
+            <LayoutList className="w-3.5 h-3.5" />
+            Transfer
+          </Button>
+          <Button
+            data-ocid="physical.open_modal_button"
+            size="sm"
+            onClick={openPhysicalWindow}
+            className="h-8 text-xs gap-1.5 bg-green-600 hover:bg-green-700 text-white border-0"
+            title={
+              sheet?.locked
+                ? "View physical entries (read-only)"
+                : "Open Physical Entry Window"
+            }
+          >
+            <Scale className="w-3.5 h-3.5" />
+            Physical
+          </Button>
+          <Button
+            data-ocid="poscount.open_modal_button"
+            size="sm"
+            onClick={openPosCountWindow}
+            className="h-8 text-xs gap-1.5 bg-sky-600 hover:bg-sky-700 text-white border-0"
+            title={
+              sheet?.locked
+                ? "View POS count entries (read-only)"
+                : "Open POS Count Entry Window"
+            }
+          >
+            <Receipt className="w-3.5 h-3.5" />
+            POS Count
+          </Button>
+          {/* Separator */}
+          <div className="w-px h-6 bg-white/20" />
           <Button
             data-ocid="sheet.print_button"
             size="sm"
@@ -1172,6 +1355,8 @@ export default function BPWSheet() {
               onProductNameChange={handleProductNameChange}
               onOpenDeliveryWindow={openDeliveryWindow}
               onOpenTransferWindow={openTransferWindow}
+              onOpenPhysicalWindow={openPhysicalWindow}
+              onOpenPosCountWindow={openPosCountWindow}
             />
           ) : (
             <div
@@ -2380,6 +2565,248 @@ export default function BPWSheet() {
                 >
                   <LayoutList className="w-4 h-4 mr-1.5" />
                   Save Transfer
+                </Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Physical Entry Window Dialog ─── */}
+      <Dialog
+        open={showPhysicalWindow}
+        onOpenChange={(open) => setShowPhysicalWindow(open)}
+      >
+        <DialogContent data-ocid="physical.dialog" className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <img
+                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                alt=""
+                className="w-6 h-6 object-contain opacity-80"
+              />
+              <Scale className="w-5 h-5 text-green-500" />
+              Physical Entry — {formatLongDate(selectedDate)}
+            </DialogTitle>
+            <DialogDescription>
+              Enter physical count for each product.
+            </DialogDescription>
+          </DialogHeader>
+
+          {sheet?.locked && (
+            <div className="flex items-center gap-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+              <Lock className="w-3.5 h-3.5 shrink-0" />
+              Day is closed. Open with Admin Edit to make changes.
+            </div>
+          )}
+
+          {/* Column headers */}
+          <div className="flex items-center gap-2 px-3 pb-1 border-b border-border">
+            <span className="text-xs font-semibold text-muted-foreground flex-1 min-w-0">
+              Product
+            </span>
+            <span className="text-xs font-semibold text-muted-foreground w-20 text-center">
+              Physical
+            </span>
+          </div>
+
+          <ScrollArea className="max-h-[55vh]">
+            <div className="pr-3">
+              {productNames.map((name, idx) => {
+                const val = physicalDraft[idx] ?? 0;
+                return (
+                  <div
+                    key={name}
+                    data-ocid={`physical.item.${idx + 1}`}
+                    className={cn(
+                      "px-3 py-1.5 rounded",
+                      idx % 2 === 0 ? "bg-muted/30" : "bg-transparent",
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="text-sm text-foreground flex-1 min-w-0 leading-tight truncate"
+                        title={name}
+                      >
+                        {name}
+                      </span>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        disabled={sheet?.locked ?? true}
+                        value={val === 0 ? "" : val}
+                        onChange={(e) => {
+                          const v = Number.parseFloat(e.target.value) || 0;
+                          setPhysicalDraft((prev) => {
+                            const next = [...prev];
+                            next[idx] = v;
+                            return next;
+                          });
+                        }}
+                        style={
+                          { MozAppearance: "textfield" } as React.CSSProperties
+                        }
+                        className={cn(
+                          "w-20 h-8 text-center text-sm font-mono border border-input rounded px-1 bg-background",
+                          "focus:outline-none focus:ring-1 focus:ring-green-400 focus:border-green-400",
+                          "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
+                          (sheet?.locked ?? true) &&
+                            "bg-muted/40 cursor-not-allowed text-muted-foreground border-border",
+                        )}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </ScrollArea>
+
+          <DialogFooter className="gap-2">
+            {sheet?.locked ? (
+              <Button
+                data-ocid="physical.close_button"
+                variant="outline"
+                onClick={() => setShowPhysicalWindow(false)}
+              >
+                Close
+              </Button>
+            ) : (
+              <>
+                <Button
+                  data-ocid="physical.cancel_button"
+                  variant="outline"
+                  onClick={() => setShowPhysicalWindow(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  data-ocid="physical.save_button"
+                  onClick={savePhysicalWindow}
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                >
+                  <Scale className="w-4 h-4 mr-1.5" />
+                  Save Physical
+                </Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── POS Count Entry Window Dialog ─── */}
+      <Dialog
+        open={showPosCountWindow}
+        onOpenChange={(open) => setShowPosCountWindow(open)}
+      >
+        <DialogContent data-ocid="poscount.dialog" className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <img
+                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                alt=""
+                className="w-6 h-6 object-contain opacity-80"
+              />
+              <Receipt className="w-5 h-5 text-sky-500" />
+              POS Count Entry — {formatLongDate(selectedDate)}
+            </DialogTitle>
+            <DialogDescription>
+              Enter POS count for each product.
+            </DialogDescription>
+          </DialogHeader>
+
+          {sheet?.locked && (
+            <div className="flex items-center gap-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+              <Lock className="w-3.5 h-3.5 shrink-0" />
+              Day is closed. Open with Admin Edit to make changes.
+            </div>
+          )}
+
+          {/* Column headers */}
+          <div className="flex items-center gap-2 px-3 pb-1 border-b border-border">
+            <span className="text-xs font-semibold text-muted-foreground flex-1 min-w-0">
+              Product
+            </span>
+            <span className="text-xs font-semibold text-muted-foreground w-20 text-center">
+              Count
+            </span>
+          </div>
+
+          <ScrollArea className="max-h-[55vh]">
+            <div className="pr-3">
+              {productNames.map((name, idx) => {
+                const val = posCountDraft[idx] ?? 0;
+                return (
+                  <div
+                    key={name}
+                    data-ocid={`poscount.item.${idx + 1}`}
+                    className={cn(
+                      "px-3 py-1.5 rounded",
+                      idx % 2 === 0 ? "bg-muted/30" : "bg-transparent",
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="text-sm text-foreground flex-1 min-w-0 leading-tight truncate"
+                        title={name}
+                      >
+                        {name}
+                      </span>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        disabled={sheet?.locked ?? true}
+                        value={val === 0 ? "" : val}
+                        onChange={(e) => {
+                          const v = Number.parseFloat(e.target.value) || 0;
+                          setPosCountDraft((prev) => {
+                            const next = [...prev];
+                            next[idx] = v;
+                            return next;
+                          });
+                        }}
+                        style={
+                          { MozAppearance: "textfield" } as React.CSSProperties
+                        }
+                        className={cn(
+                          "w-20 h-8 text-center text-sm font-mono border border-input rounded px-1 bg-background",
+                          "focus:outline-none focus:ring-1 focus:ring-sky-400 focus:border-sky-400",
+                          "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
+                          (sheet?.locked ?? true) &&
+                            "bg-muted/40 cursor-not-allowed text-muted-foreground border-border",
+                        )}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </ScrollArea>
+
+          <DialogFooter className="gap-2">
+            {sheet?.locked ? (
+              <Button
+                data-ocid="poscount.close_button"
+                variant="outline"
+                onClick={() => setShowPosCountWindow(false)}
+              >
+                Close
+              </Button>
+            ) : (
+              <>
+                <Button
+                  data-ocid="poscount.cancel_button"
+                  variant="outline"
+                  onClick={() => setShowPosCountWindow(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  data-ocid="poscount.save_button"
+                  onClick={savePosCountWindow}
+                  className="bg-sky-600 hover:bg-sky-700 text-white"
+                >
+                  <Receipt className="w-4 h-4 mr-1.5" />
+                  Save POS Count
                 </Button>
               </>
             )}

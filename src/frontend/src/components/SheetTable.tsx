@@ -19,6 +19,8 @@ interface SheetTableProps {
   onProductNameChange: (idx: number, newName: string) => void;
   onOpenDeliveryWindow?: () => void;
   onOpenTransferWindow?: () => void;
+  onOpenPhysicalWindow?: () => void;
+  onOpenPosCountWindow?: () => void;
 }
 
 const COL_HEADERS = [
@@ -38,7 +40,7 @@ const COL_HEADERS = [
 ];
 
 // Indices (0-based) of manual-entry columns
-const MANUAL_COL_INDICES = [2, 3, 6, 7, 11];
+const MANUAL_COL_INDICES = [7];
 
 // Remove spinner arrows from number inputs via inline style
 const noSpinnerStyle: React.CSSProperties = {
@@ -179,8 +181,10 @@ export default function SheetTable({
   productNames,
   onCellChange,
   onProductNameChange,
-  onOpenDeliveryWindow,
-  onOpenTransferWindow,
+  onOpenDeliveryWindow: _onOpenDeliveryWindow,
+  onOpenTransferWindow: _onOpenTransferWindow,
+  onOpenPhysicalWindow,
+  onOpenPosCountWindow,
 }: SheetTableProps) {
   if (computedRows.length === 0) return null;
 
@@ -226,24 +230,6 @@ export default function SheetTable({
                     >
                       <div className="flex items-center justify-center gap-1">
                         <span>{col.label}</span>
-                        <button
-                          type="button"
-                          data-ocid="delivery.open_modal_button"
-                          onClick={onOpenDeliveryWindow}
-                          title={
-                            locked
-                              ? "View delivery entries (read-only)"
-                              : "Open Delivery Entry Window"
-                          }
-                          className={cn(
-                            "w-4 h-4 flex items-center justify-center rounded transition-colors",
-                            locked
-                              ? "text-muted-foreground/50 cursor-default"
-                              : "text-blue-600 hover:bg-blue-100 hover:text-blue-800 cursor-pointer",
-                          )}
-                        >
-                          <LayoutList className="w-3 h-3" />
-                        </button>
                       </div>
                       <span className="block text-[8px] font-normal normal-case tracking-normal text-blue-600 opacity-80 font-semibold">
                         window only
@@ -262,31 +248,95 @@ export default function SheetTable({
                         "px-2 py-2 text-[10px] font-bold uppercase tracking-wide border border-border text-foreground/80 whitespace-nowrap",
                         col.align,
                         col.width,
-                        "bg-blue-50",
+                        "bg-purple-50",
+                      )}
+                    >
+                      <div className="flex items-center justify-center gap-1">
+                        <span>{col.label}</span>
+                      </div>
+                      <span className="block text-[8px] font-normal normal-case tracking-normal text-purple-600 opacity-80 font-semibold">
+                        window only
+                      </span>
+                    </th>
+                  );
+                }
+
+                // Special header for Physical column (index 6)
+                if (i === 6) {
+                  return (
+                    <th
+                      // biome-ignore lint/suspicious/noArrayIndexKey: fixed column headers
+                      key={i}
+                      className={cn(
+                        "px-2 py-2 text-[10px] font-bold uppercase tracking-wide border border-border text-foreground/80 whitespace-nowrap",
+                        col.align,
+                        col.width,
+                        "bg-green-50",
                       )}
                     >
                       <div className="flex items-center justify-center gap-1">
                         <span>{col.label}</span>
                         <button
                           type="button"
-                          data-ocid="transfer.open_modal_button"
-                          onClick={onOpenTransferWindow}
+                          data-ocid="physical.open_modal_button"
+                          onClick={onOpenPhysicalWindow}
                           title={
                             locked
-                              ? "View transfer entries (read-only)"
-                              : "Open Transfer Entry Window"
+                              ? "View physical entries (read-only)"
+                              : "Open Physical Entry Window"
                           }
                           className={cn(
                             "w-4 h-4 flex items-center justify-center rounded transition-colors",
                             locked
                               ? "text-muted-foreground/50 cursor-default"
-                              : "text-blue-600 hover:bg-blue-100 hover:text-blue-800 cursor-pointer",
+                              : "text-green-600 hover:bg-green-100 hover:text-green-800 cursor-pointer",
                           )}
                         >
                           <LayoutList className="w-3 h-3" />
                         </button>
                       </div>
-                      <span className="block text-[8px] font-normal normal-case tracking-normal text-blue-600 opacity-80 font-semibold">
+                      <span className="block text-[8px] font-normal normal-case tracking-normal text-green-600 opacity-80 font-semibold">
+                        window only
+                      </span>
+                    </th>
+                  );
+                }
+
+                // Special header for POS Count column (index 11)
+                if (i === 11) {
+                  return (
+                    <th
+                      // biome-ignore lint/suspicious/noArrayIndexKey: fixed column headers
+                      key={i}
+                      className={cn(
+                        "px-2 py-2 text-[10px] font-bold uppercase tracking-wide border border-border text-foreground/80 whitespace-nowrap",
+                        col.align,
+                        col.width,
+                        "bg-sky-50",
+                      )}
+                    >
+                      <div className="flex items-center justify-center gap-1">
+                        <span>{col.label}</span>
+                        <button
+                          type="button"
+                          data-ocid="poscount.open_modal_button"
+                          onClick={onOpenPosCountWindow}
+                          title={
+                            locked
+                              ? "View POS count entries (read-only)"
+                              : "Open POS Count Entry Window"
+                          }
+                          className={cn(
+                            "w-4 h-4 flex items-center justify-center rounded transition-colors",
+                            locked
+                              ? "text-muted-foreground/50 cursor-default"
+                              : "text-sky-600 hover:bg-sky-100 hover:text-sky-800 cursor-pointer",
+                          )}
+                        >
+                          <LayoutList className="w-3 h-3" />
+                        </button>
+                      </div>
+                      <span className="block text-[8px] font-normal normal-case tracking-normal text-sky-600 opacity-80 font-semibold">
                         window only
                       </span>
                     </th>
@@ -363,7 +413,7 @@ export default function SheetTable({
 
                   {/* Col 4: Transfer – window only */}
                   <td
-                    className="px-1 py-1 border border-border text-center bg-blue-50/30 cursor-not-allowed"
+                    className="px-1 py-1 border border-border text-center bg-purple-50/30 cursor-not-allowed"
                     title="Use Transfer Window to enter values"
                   >
                     <ReadCell
@@ -385,13 +435,14 @@ export default function SheetTable({
                     <ReadCell value={row.openCounter} />
                   </td>
 
-                  {/* Col 7: Physical – manual */}
-                  <td className="px-1 py-1 border border-border text-center bg-blue-50/50">
-                    <NumberInput
+                  {/* Col 7: Physical – window only */}
+                  <td
+                    className="px-1 py-1 border border-border text-center bg-green-50/30 cursor-not-allowed"
+                    title="Use Physical Entry Window to enter values"
+                  >
+                    <ReadCell
                       value={row.physical}
-                      onChange={(v) => onCellChange(idx, "physical", v)}
-                      disabled={locked}
-                      ocid={`sheet.physical.${idx + 1}`}
+                      className="text-foreground/80"
                     />
                   </td>
 
@@ -429,13 +480,14 @@ export default function SheetTable({
                     />
                   </td>
 
-                  {/* Col 12: POS Count – manual */}
-                  <td className="px-1 py-1 border border-border text-center bg-blue-50/50">
-                    <NumberInput
+                  {/* Col 12: POS Count – window only */}
+                  <td
+                    className="px-1 py-1 border border-border text-center bg-sky-50/30 cursor-not-allowed"
+                    title="Use POS Count Window to enter values"
+                  >
+                    <ReadCell
                       value={row.posCount}
-                      onChange={(v) => onCellChange(idx, "posCount", v)}
-                      disabled={locked}
-                      ocid={`sheet.poscount.${idx + 1}`}
+                      className="text-foreground/80"
                     />
                   </td>
 
@@ -470,7 +522,7 @@ export default function SheetTable({
               <td className="px-2 py-2 border border-border text-center font-mono text-[11px] text-foreground bg-blue-50/50">
                 {totalDelivery}
               </td>
-              <td className="px-2 py-2 border border-border text-center font-mono text-[11px] text-foreground bg-blue-50/50">
+              <td className="px-2 py-2 border border-border text-center font-mono text-[11px] text-foreground bg-purple-50/50">
                 {totalTransfer}
               </td>
               <td className="px-2 py-2 border border-border text-center font-mono text-[11px] font-bold text-foreground">
@@ -479,7 +531,7 @@ export default function SheetTable({
               <td className="px-2 py-2 border border-border text-center font-mono text-[11px] text-foreground">
                 {totalOpenCounter}
               </td>
-              <td className="px-2 py-2 border border-border text-center font-mono text-[11px] text-foreground bg-blue-50/50">
+              <td className="px-2 py-2 border border-border text-center font-mono text-[11px] text-foreground bg-green-50/50">
                 {totalPhysical}
               </td>
               <td className="px-2 py-2 border border-border text-center font-mono text-[11px] text-foreground bg-blue-50/50">
@@ -494,7 +546,7 @@ export default function SheetTable({
               <td className="px-2 py-2 border border-border text-[11px] font-bold text-foreground uppercase">
                 TOTALS
               </td>
-              <td className="px-2 py-2 border border-border text-center font-mono text-[11px] text-foreground bg-blue-50/50">
+              <td className="px-2 py-2 border border-border text-center font-mono text-[11px] text-foreground bg-sky-50/50">
                 {totalPosCount}
               </td>
               <td
