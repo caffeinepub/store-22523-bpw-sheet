@@ -27,6 +27,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useActor } from "../hooks/useActor";
 import {
+  flushPendingWrites,
   getMostRecentLockedSheetFromBackend,
   getOrCreateSheetFromBackend,
   loadAllSheetsFromBackend,
@@ -35,6 +36,7 @@ import {
   saveSheetToBackend,
 } from "../lib/backendStorage";
 import { computeRow } from "../lib/calculations";
+import { cacheSheet, hasPendingWrites } from "../lib/offlineStorage";
 import {
   DEFAULT_PRODUCTS,
   type DailySheet,
@@ -190,9 +192,9 @@ export default function BPWSheet() {
     })),
     locked: false,
   }));
-  const [syncStatus, setSyncStatus] = useState<"syncing" | "live" | "offline">(
-    "syncing",
-  );
+  const [syncStatus, setSyncStatus] = useState<
+    "syncing" | "live" | "offline" | "queued"
+  >("syncing");
   const [allDates, setAllDates] = useState<string[]>([]);
   const [lockedDates, setLockedDates] = useState<string[]>([]);
   const [showCloseDialog, setShowCloseDialog] = useState(false);
@@ -294,7 +296,8 @@ export default function BPWSheet() {
         }
         // After loading, check for pending writes to determine status
         if (!cancelled) {
-          setSyncStatus("live");
+          const pending = await hasPendingWrites();
+          setSyncStatus(pending ? "queued" : "live");
         }
       } catch (err) {
         console.error("Failed to load sheet:", err);
@@ -308,6 +311,27 @@ export default function BPWSheet() {
       cancelled = true;
     };
   }, [selectedDate, actor, actorFetching]);
+
+  // Flush pending writes on mount and when coming back online
+  useEffect(() => {
+    const tryFlush = async () => {
+      if (!actor) return;
+      try {
+        await flushPendingWrites(actor);
+        const pending = await hasPendingWrites();
+        setSyncStatus(pending ? "queued" : "live");
+      } catch {
+        // Still offline — keep current status
+      }
+    };
+
+    if (actor) {
+      tryFlush();
+    }
+
+    window.addEventListener("online", tryFlush);
+    return () => window.removeEventListener("online", tryFlush);
+  }, [actor]);
 
   // Helper to refresh allDates and lockedDates from backend
   const refreshDatesFromBackend = useCallback(async () => {
@@ -336,11 +360,10 @@ export default function BPWSheet() {
         if (actor) {
           await saveProductNamesToBackend(actor, updatedNames);
         }
-        setSyncStatus("live");
+        const pending = await hasPendingWrites();
+        setSyncStatus(pending ? "queued" : "live");
       } catch (err) {
         console.error("Failed to save product names:", err);
-        setSyncStatus("offline");
-        toast.error("Save failed. Please check your connection and try again.");
       }
       setSheet((prev) => {
         if (!prev) return prev;
@@ -358,21 +381,11 @@ export default function BPWSheet() {
         try {
           if (actor) {
             await saveSheetToBackend(actor, updated);
+          } else {
+            await cacheSheet(updated);
           }
         } catch (err) {
           console.error("Failed to save sheet:", err);
-          setSyncStatus("offline");
-          toast.error(
-            "Save failed. Please check your connection and try again.",
-          );
-          setSyncStatus("offline");
-          toast.error(
-            "Save failed. Please check your connection and try again.",
-          );
-          setSyncStatus("offline");
-          toast.error(
-            "Save failed. Please check your connection and try again.",
-          );
         }
       }
       toast.success("Product name updated");
@@ -399,12 +412,13 @@ export default function BPWSheet() {
       try {
         if (actor) {
           await saveSheetToBackend(actor, updated);
+        } else {
+          await cacheSheet(updated);
         }
-        setSyncStatus("live");
+        const pending = await hasPendingWrites();
+        setSyncStatus(pending ? "queued" : "live");
       } catch (err) {
         console.error("Failed to save sheet:", err);
-        setSyncStatus("offline");
-        toast.error("Save failed. Please check your connection and try again.");
       }
     },
     [sheet, actor],
@@ -425,11 +439,11 @@ export default function BPWSheet() {
     try {
       if (actor) {
         await saveSheetToBackend(actor, locked);
+      } else {
+        await cacheSheet(locked);
       }
     } catch (err) {
       console.error("Failed to save locked sheet:", err);
-      setSyncStatus("offline");
-      toast.error("Save failed. Please check your connection and try again.");
     }
     setSheet(locked);
 
@@ -463,14 +477,15 @@ export default function BPWSheet() {
     try {
       if (actor) {
         await saveSheetToBackend(actor, nextSheet);
+      } else {
+        await cacheSheet(nextSheet);
       }
     } catch (err) {
       console.error("Failed to save next day sheet:", err);
-      setSyncStatus("offline");
-      toast.error("Save failed. Please check your connection and try again.");
     }
 
-    setSyncStatus("live");
+    const pendingAfterClose = await hasPendingWrites();
+    setSyncStatus(pendingAfterClose ? "queued" : "live");
 
     await refreshDatesFromBackend();
     setShowCloseDialog(false);
@@ -499,14 +514,13 @@ export default function BPWSheet() {
     try {
       if (actor) {
         await saveSheetToBackend(actor, resetSheet);
+      } else {
+        await cacheSheet(resetSheet);
       }
-      setSyncStatus("live");
+      const pending = await hasPendingWrites();
+      setSyncStatus(pending ? "queued" : "live");
     } catch (err) {
       console.error("Failed to save reset sheet:", err);
-      setSyncStatus("offline");
-      toast.error("Save failed. Please check your connection and try again.");
-      setSyncStatus("offline");
-      toast.error("Save failed. Please check your connection and try again.");
     }
     setSheet(resetSheet);
     setShowResetDialog(false);
@@ -543,8 +557,11 @@ export default function BPWSheet() {
     try {
       if (actor) {
         await saveSheetToBackend(actor, resetSheet);
+      } else {
+        await cacheSheet(resetSheet);
       }
-      setSyncStatus("live");
+      const pending = await hasPendingWrites();
+      setSyncStatus(pending ? "queued" : "live");
     } catch (err) {
       console.error("Failed to save admin reset sheet:", err);
     }
@@ -569,12 +586,13 @@ export default function BPWSheet() {
     try {
       if (actor) {
         await saveSheetToBackend(actor, unlocked);
+      } else {
+        await cacheSheet(unlocked);
       }
-      setSyncStatus("live");
+      const pending = await hasPendingWrites();
+      setSyncStatus(pending ? "queued" : "live");
     } catch (err) {
       console.error("Failed to save unlocked sheet:", err);
-      setSyncStatus("offline");
-      toast.error("Save failed. Please check your connection and try again.");
     }
     setSheet(unlocked);
     await refreshDatesFromBackend();
@@ -613,12 +631,13 @@ export default function BPWSheet() {
     try {
       if (actor) {
         await saveSheetToBackend(actor, updated);
+      } else {
+        await cacheSheet(updated);
       }
-      setSyncStatus("live");
+      const pending = await hasPendingWrites();
+      setSyncStatus(pending ? "queued" : "live");
     } catch (err) {
       console.error("Failed to save sheet:", err);
-      setSyncStatus("offline");
-      toast.error("Save failed. Please check your connection and try again.");
     }
     setSheet(updated);
     setShowDefaultQtyDialog(false);
@@ -740,12 +759,13 @@ export default function BPWSheet() {
     try {
       if (actor) {
         await saveSheetToBackend(actor, updated);
+      } else {
+        await cacheSheet(updated);
       }
-      setSyncStatus("live");
+      const pending = await hasPendingWrites();
+      setSyncStatus(pending ? "queued" : "live");
     } catch (err) {
       console.error("Failed to save delivery entries:", err);
-      setSyncStatus("offline");
-      toast.error("Save failed. Please check your connection and try again.");
     }
     setSheet(updated);
     setShowDeliveryWindow(false);
@@ -788,12 +808,13 @@ export default function BPWSheet() {
     try {
       if (actor) {
         await saveSheetToBackend(actor, updated);
+      } else {
+        await cacheSheet(updated);
       }
-      setSyncStatus("live");
+      const pending = await hasPendingWrites();
+      setSyncStatus(pending ? "queued" : "live");
     } catch (err) {
       console.error("Failed to save transfer entries:", err);
-      setSyncStatus("offline");
-      toast.error("Save failed. Please check your connection and try again.");
     }
     setSheet(updated);
     setShowTransferWindow(false);
@@ -902,19 +923,21 @@ export default function BPWSheet() {
               Store 22523
             </h1>
             <div className="flex items-center gap-1.5 mt-0.5">
-              <p className="text-white/60 text-[10px]">BPW Daily Sheet · v28</p>
+              <p className="text-white/60 text-[10px]">BPW Daily Sheet · v27</p>
               <span
                 className={cn(
                   "w-2 h-2 rounded-full shrink-0",
                   syncStatus === "syncing" && "bg-yellow-400 animate-pulse",
                   syncStatus === "live" && "bg-green-400",
                   syncStatus === "offline" && "bg-red-400",
+                  syncStatus === "queued" && "bg-amber-400 animate-pulse",
                 )}
               />
               <span className="text-[9px] text-white/50">
                 {syncStatus === "syncing" && "Syncing..."}
                 {syncStatus === "live" && "Live"}
                 {syncStatus === "offline" && "Offline"}
+                {syncStatus === "queued" && "Pending sync"}
               </span>
             </div>
           </div>

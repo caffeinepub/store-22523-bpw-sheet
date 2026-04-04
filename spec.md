@@ -1,39 +1,44 @@
 # Store 22523 BPW Sheet
 
 ## Current State
-The app uses the ICP blockchain canister as its sole data store. Every read/write goes directly to the canister via the actor. If the canister is unreachable (network offline, canister busy, cold-start latency), the sheet cannot save, and the user sees a "server down" / toast error. There is no local persistence layer between the UI and the canister.
+The app uses an offline-first architecture:
+- `offlineStorage.ts` — IndexedDB layer with `bpw_offline_v1` database storing sheets, product names, and a `pendingWrites` sync queue
+- `backendStorage.ts` — Orchestration layer: all reads return IndexedDB cache immediately, canister is updated asynchronously in background; all writes go to IndexedDB first, then attempt canister, and on failure enqueue to the pending-writes queue
+- `BPWSheet.tsx` — Imports `cacheSheet` and `hasPendingWrites` from `offlineStorage`; has a `flushPendingWrites` effect that runs on mount and on `online` events; all save operations check pending-write queue and show a `"queued"` sync status
 
 ## Requested Changes (Diff)
 
 ### Add
-- **IndexedDB offline cache** (`offlineStorage.ts`): stores sheets and product names locally in the browser's IndexedDB so the app works fully offline.
-- **Pending-writes queue** in IndexedDB: every save that fails or is done offline is queued. When connectivity returns, queued writes are flushed to the canister automatically.
-- **Sync status indicator** (already partially present): Yellow dot = syncing/offline write queued; Green dot = live and confirmed synced; Red dot = offline (working from local cache). Text next to dot shows status.
-- **Auto-retry background sync**: on regaining connectivity (`online` event), pending writes are flushed automatically.
-- **Graceful degradation**: reads first check IndexedDB cache; if canister fails, the cached version is used seamlessly without any error shown to user.
+- Immediate error feedback on the specific save operation that fails (cell shows saving indicator; on failure shows inline error)
+- Simplified sync status: only `"syncing"` (in-flight), `"live"` (success), `"offline"` (error)
 
 ### Modify
-- `backendStorage.ts`: wrap all `saveSheet` / `saveProductNames` calls to write to IndexedDB first (optimistic), then attempt canister write; if canister write fails, enqueue the save for later retry.
-- `backendStorage.ts`: wrap all `loadSheet` / `loadAllSheets` / `loadProductNames` calls to return from IndexedDB cache immediately, then update from canister in the background.
-- `BPWSheet.tsx`: update sync status display to reflect offline-first states (offline, queued, live). Remove any blocking error states.
+- `backendStorage.ts` — Completely rewrite all async functions to call `actor.*()` directly, with no IndexedDB reads or writes. Keep type-conversion helpers (`toBackendSheet`, `convertBackendSheet`, etc.) unchanged. All functions are now direct await calls that throw on failure.
+- `BPWSheet.tsx` — Remove all `offlineStorage` imports, remove `flushPendingWrites` useEffect, remove all `hasPendingWrites()` calls, remove all `else { cacheSheet() }` fallbacks, remove `"queued"` sync state, simplify sync status to three states.
 
 ### Remove
-- The toast error "Could not reach server. Using local defaults." — replace with silent fallback to cache + status indicator update.
+- `offlineStorage.ts` — Entire IndexedDB layer deleted
+- `pendingWrites` sync queue logic throughout `BPWSheet.tsx` and `backendStorage.ts`
+- `flushPendingWrites` function and its `useEffect` in `BPWSheet.tsx`
 
 ## Implementation Plan
-1. Create `src/frontend/src/lib/offlineStorage.ts` — IndexedDB wrapper using idb-like pattern (native IndexedDB API) for:
-   - `getSheet(date)` / `setSheet(sheet)`
-   - `getAllSheets()` / `setAllSheets(sheets[])`  
-   - `getProductNames()` / `setProductNames(names[])`
-   - `getPendingWrites()` / `addPendingWrite(op)` / `removePendingWrite(id)`
-2. Update `backendStorage.ts`:
-   - `saveSheetToBackend`: write to IndexedDB immediately, then try canister; on failure queue the operation
-   - `loadSheetFromBackend`: return IndexedDB cache immediately; refresh from canister in background
-   - `loadAllSheetsFromBackend`: same pattern
-   - `loadProductNamesFromBackend`: same pattern
-   - `saveProductNamesToBackend`: same pattern
-   - Add `flushPendingWrites(actor)`: attempt to push all pending writes to canister
-3. Update `BPWSheet.tsx`:
-   - On mount and `online` event, call `flushPendingWrites`
-   - Update sync dot: yellow=queued pending writes or syncing, green=live+no pending, red=canister unreachable (but still working offline)
-   - Remove the blocking error toast for server failures
+1. Delete `src/frontend/src/lib/offlineStorage.ts`
+2. Rewrite `src/frontend/src/lib/backendStorage.ts`:
+   - Keep all type-conversion helpers
+   - `saveSheetToBackend(actor, sheet)` → `await actor.saveSheet(toBackendSheet(sheet))`
+   - `loadSheetFromBackend(actor, date)` → `await actor.loadSheet(date)` + convert
+   - `loadAllSheetsFromBackend(actor)` → `await actor.loadAllSheets()` + convert
+   - `saveProductNamesToBackend(actor, names)` → `await actor.saveProductNames(names)`
+   - `loadProductNamesFromBackend(actor)` → `await actor.loadProductNames()` + convert
+   - `getOrCreateSheetFromBackend(actor, date, names)` → canister-only: load sheet, if not found create from previous locked sheet, save to canister
+   - `getMostRecentLockedSheetFromBackend(actor, date)` → load all from canister, filter
+   - Remove `flushPendingWrites`, `syncFromCanister` (no longer needed)
+3. Edit `BPWSheet.tsx`:
+   - Remove `import { cacheSheet, hasPendingWrites } from "../lib/offlineStorage"`
+   - Remove `flushPendingWrites` from backendStorage imports
+   - Remove the `flushPendingWrites` useEffect block
+   - Remove all `hasPendingWrites()` calls
+   - Remove all `else { await cacheSheet(updated) }` fallbacks on all save handlers
+   - Remove `"queued"` from `SyncStatus` type
+   - Update sync status indicator: yellow = syncing, green = live, red = offline/error
+   - On save failure: set `syncStatus = "offline"` and show a brief toast/alert so staff know to retry

@@ -1,27 +1,11 @@
 /**
- * Backend storage helpers — offline-first.
- * All reads return from IndexedDB cache immediately.
- * Writes go to IndexedDB first, then attempt canister sync.
- * Failed canister writes are queued and retried when online.
+ * Backend storage helpers — direct-to-canister.
+ * Every read and write goes directly to the ICP canister.
+ * No IndexedDB, no local cache, no pending writes queue.
+ * If a canister call fails, the error propagates immediately to the caller.
  */
 
-import type {
-  ProductNameEntry,
-  SheetEntry,
-  backendInterface,
-} from "../backend";
-
-// Full backup payload type (mirrors FullBackup in backend.d.ts)
-interface FullBackup {
-  sheets: SheetEntry[];
-  productNames: ProductNameEntry[];
-}
-
-// Extended interface that includes backup methods (present in backend but not in generated bindings)
-interface BackendWithBackup extends backendInterface {
-  exportAllData(): Promise<FullBackup>;
-  importAllData(backup: FullBackup): Promise<void>;
-}
+import type { backendInterface } from "../backend";
 
 import type {
   DailySheet as BackendDailySheet,
@@ -29,17 +13,6 @@ import type {
   ProductRow as BackendProductRow,
   ReportRow as BackendReportRow,
 } from "../backend";
-import {
-  cacheAllSheets,
-  cacheProductNames,
-  cacheSheet,
-  dequeuePendingWrite,
-  enqueuePendingWrite,
-  getAllCachedSheets,
-  getAllPendingWrites,
-  getCachedProductNames,
-  getCachedSheet,
-} from "./offlineStorage";
 import {
   DEFAULT_PRODUCTS,
   calcTotalBA,
@@ -169,239 +142,112 @@ export function convertBackendSheet(bs: BackendDailySheet): DailySheet {
   };
 }
 
-// ── Offline-first Backend Storage API ──────────────────────────────────────────────
+// ── Direct-to-Canister Backend Storage API ────────────────────────────────────────
 
 /**
- * Save a single sheet.
- * Writes to IndexedDB immediately (optimistic), then syncs to canister.
- * If canister is unreachable, queues for later retry.
+ * Save a single sheet directly to the canister.
+ * Throws if the canister call fails — caller must handle the error.
  */
 export async function saveSheetToBackend(
   actor: backendInterface,
   sheet: DailySheet,
 ): Promise<void> {
-  // 1. Write to local cache immediately
-  await cacheSheet(sheet);
-
-  // 2. Try canister write
-  try {
-    await actor.saveSheet(toBackendSheet(sheet));
-    // Remove any existing pending write for this date (now synced)
-    const pending = await getAllPendingWrites();
-    for (const op of pending) {
-      if (
-        op.type === "saveSheet" &&
-        (op.payload as DailySheet).date === sheet.date
-      ) {
-        await dequeuePendingWrite(op.id);
-      }
-    }
-  } catch {
-    // Queue for background sync
-    const existing = (await getAllPendingWrites()).find(
-      (op) =>
-        op.type === "saveSheet" &&
-        (op.payload as DailySheet).date === sheet.date,
-    );
-    if (existing) {
-      // Update existing pending write with latest data
-      await dequeuePendingWrite(existing.id);
-    }
-    await enqueuePendingWrite({
-      id: `saveSheet_${sheet.date}`,
-      type: "saveSheet",
-      payload: sheet,
-    });
-    // Don't throw — offline save succeeded
-  }
+  await actor.saveSheet(toBackendSheet(sheet));
 }
 
 /**
- * Load a single sheet.
- * Returns cached version immediately, refreshes from canister in background.
+ * Load a single sheet directly from the canister.
+ * Returns null if no sheet exists for the given date.
+ * Throws if the canister call fails.
  */
 export async function loadSheetFromBackend(
   actor: backendInterface,
   date: string,
 ): Promise<DailySheet | null> {
-  // Return cached version
-  const cached = await getCachedSheet<DailySheet>(date);
-
-  // Refresh from canister in background (fire and forget)
-  actor
-    .loadSheet(date)
-    .then(async (result) => {
-      if (result != null) {
-        const sheet = convertBackendSheet(result);
-        await cacheSheet(sheet);
-      }
-    })
-    .catch(() => {
-      /* ignore, use cache */
-    });
-
-  return cached;
+  const result = await actor.loadSheet(date);
+  if (!result) return null;
+  return convertBackendSheet(result);
 }
 
 /**
- * Load all sheets.
- * Returns from IndexedDB cache immediately; syncs from canister in background.
+ * Load all sheets directly from the canister.
+ * Throws if the canister call fails.
  */
 export async function loadAllSheetsFromBackend(
   actor: backendInterface,
 ): Promise<DailySheet[]> {
-  const cached = await getAllCachedSheets<DailySheet>();
-
-  // Background refresh
-  actor
-    .loadAllSheets()
-    .then(async (entries) => {
-      const sheets = entries.map((e) => convertBackendSheet(e.value.sheet));
-      await cacheAllSheets(sheets);
-    })
-    .catch(() => {
-      /* ignore, use cache */
-    });
-
-  return cached;
+  const entries = await actor.loadAllSheets();
+  return entries.map((e) => convertBackendSheet(e.value.sheet));
 }
 
 /**
- * Save product names.
- * Writes to IndexedDB immediately, then syncs to canister.
+ * Save product names directly to the canister.
+ * Throws if the canister call fails.
  */
 export async function saveProductNamesToBackend(
   actor: backendInterface,
   names: string[],
 ): Promise<void> {
-  await cacheProductNames(names);
-
-  try {
-    await actor.saveProductNames(names);
-    // Remove pending write if any
-    const pending = await getAllPendingWrites();
-    for (const op of pending) {
-      if (op.type === "saveProductNames") {
-        await dequeuePendingWrite(op.id);
-      }
-    }
-  } catch {
-    const existing = (await getAllPendingWrites()).find(
-      (op) => op.type === "saveProductNames",
-    );
-    if (existing) await dequeuePendingWrite(existing.id);
-    await enqueuePendingWrite({
-      id: "saveProductNames",
-      type: "saveProductNames",
-      payload: names,
-    });
-  }
+  await actor.saveProductNames(names);
 }
 
 /**
- * Load product names.
- * Returns from IndexedDB cache; refreshes from canister in background.
+ * Load product names directly from the canister.
+ * Returns DEFAULT_PRODUCTS if no names are found (first-time setup).
+ * Throws if the canister call fails.
  */
 export async function loadProductNamesFromBackend(
   actor: backendInterface,
 ): Promise<string[]> {
-  const cached = await getCachedProductNames();
-
-  // Background refresh from canister
-  actor
-    .loadProductNames()
-    .then(async (entries) => {
-      if (entries && entries.length > 0) {
-        const names = entries
-          .sort((a, b) => Number(a.key.index - b.key.index))
-          .map((e) => e.value.name);
-        await cacheProductNames(names);
-      } else {
-        // First-time setup: push defaults to canister
-        await actor.saveProductNames(DEFAULT_PRODUCTS);
-        await cacheProductNames(DEFAULT_PRODUCTS);
-      }
-    })
-    .catch(() => {
-      /* ignore, use cache */
-    });
-
-  if (cached && cached.length > 0) return cached;
-
-  // No cache, try canister synchronously as fallback
-  try {
-    const entries = await actor.loadProductNames();
-    if (!entries || entries.length === 0) {
-      await actor.saveProductNames(DEFAULT_PRODUCTS);
-      await cacheProductNames(DEFAULT_PRODUCTS);
-      return [...DEFAULT_PRODUCTS];
-    }
-    const names = entries
-      .sort((a, b) => Number(a.key.index - b.key.index))
-      .map((e) => e.value.name);
-    await cacheProductNames(names);
-    return names;
-  } catch {
-    await cacheProductNames(DEFAULT_PRODUCTS);
+  const entries = await actor.loadProductNames();
+  if (!entries || entries.length === 0) {
+    // First-time setup: push defaults to canister
+    await actor.saveProductNames(DEFAULT_PRODUCTS);
     return [...DEFAULT_PRODUCTS];
   }
+  const sorted = [...entries].sort(
+    (a, b) => Number(a.key.index) - Number(b.key.index),
+  );
+  return sorted.map((e) => e.value.name);
 }
 
-/** Get the most recent locked sheet before a given date */
+/** Get the most recent locked sheet before a given date — direct from canister */
 export async function getMostRecentLockedSheetFromBackend(
   actor: backendInterface,
   beforeDate: string,
 ): Promise<DailySheet | null> {
-  const all = await loadAllSheetsFromBackend(actor);
-  const locked = all
+  const allSheets = await loadAllSheetsFromBackend(actor);
+  const locked = allSheets
     .filter((s) => s.locked && s.date < beforeDate)
     .sort((a, b) => b.date.localeCompare(a.date));
   return locked[0] ?? null;
 }
 
 /**
- * Get or create a sheet for a date.
- * If no sheet exists locally, try canister, then carry forward from prev locked sheet.
+ * Get or create a sheet for a date — direct from canister.
+ * If no sheet exists, carries forward from prev locked sheet and saves it.
+ * Throws if any canister call fails.
  */
 export async function getOrCreateSheetFromBackend(
   actor: backendInterface,
   date: string,
   productNames: string[],
 ): Promise<DailySheet> {
-  // Check local cache first
-  const cached = await getCachedSheet<DailySheet>(date);
-  if (cached) {
-    // Background refresh from canister
-    actor
-      .loadSheet(date)
-      .then(async (result) => {
-        if (result != null) {
-          const sheet = convertBackendSheet(result);
-          await cacheSheet(sheet);
-        }
-      })
-      .catch(() => {});
-    return cached;
-  }
+  // Try loading existing sheet
+  const existing = await loadSheetFromBackend(actor, date);
+  if (existing) return existing;
 
-  // Try canister
-  try {
-    const result = await actor.loadSheet(date);
-    if (result != null) {
-      const sheet = convertBackendSheet(result);
-      await cacheSheet(sheet);
-      return sheet;
-    }
-  } catch {
-    // Canister unreachable — fall through to create from prev locked sheet
-  }
+  // Get previous locked sheet for Opening/Open Counter carry-forward
+  const allSheets = await loadAllSheetsFromBackend(actor);
+  const prevLocked =
+    allSheets
+      .filter((s) => s.locked && s.date < date)
+      .sort((a, b) => b.date.localeCompare(a.date))[0] ?? null;
 
-  // Create new sheet from previous locked sheet (from cache)
-  const prev = await getMostRecentLockedSheetFromBackend(actor, date);
-
+  // Create new sheet
   const rows = productNames.map((name, idx) => {
-    if (prev) {
-      const prevRow = prev.rows[idx];
+    if (prevLocked) {
+      const prevRow = prevLocked.rows[idx];
       if (prevRow) {
         const prevTotalBA = calcTotalBA(prevRow);
         const prevTotalCounter = calcTotalCounter(prevRow);
@@ -411,138 +257,7 @@ export async function getOrCreateSheetFromBackend(
     return emptyRow(name, 0, 0);
   });
 
-  const sheet: DailySheet = { date, rows, locked: false };
-  // Save to both cache and canister
-  await cacheSheet(sheet);
-  actor.saveSheet(toBackendSheet(sheet)).catch(async () => {
-    await enqueuePendingWrite({
-      id: `saveSheet_${sheet.date}`,
-      type: "saveSheet",
-      payload: sheet,
-    });
-  });
-  return sheet;
-}
-
-/**
- * Flush all pending writes to canister.
- * Called when coming online or on mount.
- * Returns number of successfully flushed writes.
- */
-export async function flushPendingWrites(
-  actor: backendInterface,
-): Promise<number> {
-  const pending = await getAllPendingWrites();
-  let flushed = 0;
-  for (const op of pending) {
-    try {
-      if (op.type === "saveSheet") {
-        await actor.saveSheet(toBackendSheet(op.payload as DailySheet));
-      } else if (op.type === "saveProductNames") {
-        await actor.saveProductNames(op.payload as string[]);
-      }
-      await dequeuePendingWrite(op.id);
-      flushed++;
-    } catch {
-      // Still offline — leave in queue
-      break;
-    }
-  }
-  return flushed;
-}
-
-/**
- * Full data sync: load all sheets and product names from canister
- * and update the local cache. Returns the refreshed data.
- */
-export async function syncFromCanister(actor: backendInterface): Promise<{
-  productNames: string[];
-  sheets: DailySheet[];
-}> {
-  const [entries, allSheets] = await Promise.all([
-    actor.loadProductNames(),
-    actor.loadAllSheets(),
-  ]);
-
-  const sheets = allSheets.map((e) => convertBackendSheet(e.value.sheet));
-  await cacheAllSheets(sheets);
-
-  let names: string[];
-  if (!entries || entries.length === 0) {
-    await actor.saveProductNames(DEFAULT_PRODUCTS);
-    names = [...DEFAULT_PRODUCTS];
-  } else {
-    names = entries
-      .sort((a, b) => Number(a.key.index - b.key.index))
-      .map((e) => e.value.name);
-  }
-  await cacheProductNames(names);
-
-  return { productNames: names, sheets };
-}
-
-// ── Backup / Restore ──────────────────────────────────────────────────────────────────
-
-/** Download all data as a JSON backup file */
-export async function downloadBackup(actor: backendInterface): Promise<void> {
-  const backupActor = actor as BackendWithBackup;
-  const backup = await backupActor.exportAllData();
-  const json = JSON.stringify(
-    backup,
-    (_, v) => (typeof v === "bigint" ? Number(v) : v),
-    2,
-  );
-  const blob = new Blob([json], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  const today = new Date().toISOString().slice(0, 10);
-  a.href = url;
-  a.download = `bpw-backup-${today}.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-/** Restore data from a JSON backup file — overwrites all existing data */
-export async function restoreBackup(
-  actor: backendInterface,
-  file: File,
-): Promise<void> {
-  const text = await file.text();
-  const raw = JSON.parse(text);
-
-  // Deep-convert: productIndex and cellIndex inside negativeEntries must be BigInt
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const convertNegativeEntry = (e: any) => ({
-    ...e,
-    productIndex: BigInt(e.productIndex ?? 0),
-    cellIndex: BigInt(e.cellIndex ?? 0),
-  });
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const convertSheet = (sheet: any) => ({
-    ...sheet,
-    negativeEntries: (sheet.negativeEntries ?? []).map(convertNegativeEntry),
-  });
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const convertSheetEntry = (entry: any) => ({
-    ...entry,
-    value: { ...entry.value, sheet: convertSheet(entry.value.sheet) },
-  });
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const convertProductNameEntry = (entry: any) => ({
-    ...entry,
-    key: { ...entry.key, index: BigInt(entry.key.index ?? 0) },
-  });
-
-  const backup = {
-    sheets: (raw.sheets ?? []).map(convertSheetEntry),
-    productNames: (raw.productNames ?? []).map(convertProductNameEntry),
-  };
-
-  const backupActor = actor as BackendWithBackup;
-  await backupActor.importAllData(backup);
+  const newSheet: DailySheet = { date, rows, locked: false };
+  await saveSheetToBackend(actor, newSheet);
+  return newSheet;
 }
