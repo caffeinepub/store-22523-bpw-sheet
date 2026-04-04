@@ -7,6 +7,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import {
@@ -19,6 +25,7 @@ import {
   LayoutList,
   Lock,
   LockOpen,
+  MoreVertical,
   Printer,
   Receipt,
   RotateCcw,
@@ -1041,149 +1048,155 @@ export default function BPWSheet() {
       )}
       {/* ─── Header ─── */}
       <header
-        className="no-print sticky top-0 z-30 shrink-0 flex items-center justify-between px-4 py-3 gap-3"
+        className="no-print sticky top-0 z-30 shrink-0 px-3 py-2"
         style={{
           background:
             "linear-gradient(90deg, oklch(0.25 0.1 249), oklch(0.32 0.12 249))",
         }}
       >
-        {/* Left: Store branding + Calendar slicer toggle */}
-        <div className="flex items-center gap-2.5">
-          <Button
-            data-ocid="slicer.open_modal_button"
-            size="sm"
-            variant="outline"
-            onClick={() => setSlicerOpen((v) => !v)}
-            className="h-8 text-xs gap-1.5 border-white/30 text-white hover:bg-white/10 bg-transparent"
-            aria-label="Toggle calendar slicer"
-          >
-            <CalendarIcon className="w-3.5 h-3.5" />
-            Calendar
-          </Button>
-          <div className="w-px h-6 bg-white/20" />
-          <img
-            src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
-            alt="22523 BPW Logo"
-            className="w-9 h-9 object-contain rounded-lg"
-            style={{ background: "rgba(255,255,255,0.1)" }}
-          />
-          <div>
-            <h1 className="text-white font-bold text-sm leading-none">
-              Store 22523
-            </h1>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <p className="text-white/60 text-[10px]">BPW Daily Sheet · v28</p>
-              <span
-                className={cn(
-                  "w-2 h-2 rounded-full shrink-0",
-                  syncStatus === "syncing" && "bg-yellow-400 animate-pulse",
-                  syncStatus === "live" && "bg-green-400",
-                  syncStatus === "error" && "bg-red-400",
-                )}
-              />
-              <span className="text-[9px] text-white/50">
-                {syncStatus === "syncing" && "Syncing..."}
-                {syncStatus === "live" && "Live"}
-                {syncStatus === "error" && "Save Error"}
-              </span>
+        {/* Row 1: Branding + Date + Sync */}
+        <div className="flex items-center justify-between gap-2 mb-2">
+          {/* Left: Calendar + Logo + Title */}
+          <div className="flex items-center gap-2 min-w-0">
+            <Button
+              data-ocid="slicer.open_modal_button"
+              size="sm"
+              variant="outline"
+              onClick={() => setSlicerOpen((v) => !v)}
+              className="h-7 text-xs gap-1 border-white/30 text-white hover:bg-white/10 bg-transparent px-2 shrink-0"
+              aria-label="Toggle calendar slicer"
+            >
+              <CalendarIcon className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Calendar</span>
+            </Button>
+            <img
+              src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+              alt="22523 BPW Logo"
+              className="w-7 h-7 object-contain rounded shrink-0"
+              style={{ background: "rgba(255,255,255,0.1)" }}
+            />
+            <div className="min-w-0">
+              <h1 className="text-white font-bold text-xs leading-none">
+                Store 22523
+              </h1>
+              <div className="flex items-center gap-1 mt-0.5">
+                <p className="text-white/60 text-[9px]">
+                  BPW Daily Sheet · v28
+                </p>
+                <span
+                  className={cn(
+                    "w-1.5 h-1.5 rounded-full shrink-0",
+                    syncStatus === "syncing" && "bg-yellow-400 animate-pulse",
+                    syncStatus === "live" && "bg-green-400",
+                    syncStatus === "error" && "bg-red-400",
+                  )}
+                />
+                <span className="text-[8px] text-white/50 hidden sm:inline">
+                  {syncStatus === "syncing" && "Syncing..."}
+                  {syncStatus === "live" && "Live"}
+                  {syncStatus === "error" && "Save Error"}
+                </span>
+              </div>
             </div>
+          </div>
+
+          {/* Center: Date */}
+          <div className="text-center flex-1 px-2">
+            <p className="text-white font-semibold text-xs sm:text-sm leading-tight">
+              {formatLongDate(selectedDate)}
+            </p>
+            {sheet?.locked && (
+              <span className="inline-flex items-center gap-1 text-amber-300 text-[9px]">
+                <Lock className="w-2.5 h-2.5" /> Locked
+              </span>
+            )}
+          </div>
+
+          {/* Right: Entry window buttons (always visible) */}
+          <div className="flex items-center gap-1 shrink-0">
+            <Button
+              data-ocid="delivery.open_modal_button"
+              size="sm"
+              onClick={openDeliveryWindow}
+              className="h-7 text-xs gap-1 bg-blue-600 hover:bg-blue-700 text-white border-0 px-2"
+              title={
+                sheet?.locked
+                  ? "View delivery entries (read-only)"
+                  : "Open Delivery Entry Window"
+              }
+            >
+              <Truck className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Delivery</span>
+            </Button>
+            <Button
+              data-ocid="transfer.open_modal_button"
+              size="sm"
+              onClick={openTransferWindow}
+              className="h-7 text-xs gap-1 bg-purple-600 hover:bg-purple-700 text-white border-0 px-2"
+              title={
+                sheet?.locked
+                  ? "View transfer entries (read-only)"
+                  : "Open Transfer Entry Window"
+              }
+            >
+              <LayoutList className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Transfer</span>
+            </Button>
+            <Button
+              data-ocid="physical.open_modal_button"
+              size="sm"
+              onClick={openPhysicalWindow}
+              className="h-7 text-xs gap-1 bg-green-600 hover:bg-green-700 text-white border-0 px-2"
+              title={
+                sheet?.locked
+                  ? "View physical entries (read-only)"
+                  : "Open Physical Entry Window"
+              }
+            >
+              <Scale className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Physical</span>
+            </Button>
+            <Button
+              data-ocid="poscount.open_modal_button"
+              size="sm"
+              onClick={openPosCountWindow}
+              className="h-7 text-xs gap-1 bg-sky-600 hover:bg-sky-700 text-white border-0 px-2"
+              title={
+                sheet?.locked
+                  ? "View POS count entries (read-only)"
+                  : "Open POS Count Entry Window"
+              }
+            >
+              <Receipt className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">POS</span>
+            </Button>
           </div>
         </div>
 
-        {/* Center: Selected date */}
-        <div className="text-center">
-          <p className="text-white font-semibold text-sm">
-            {formatLongDate(selectedDate)}
-          </p>
-          {sheet?.locked && (
-            <span className="inline-flex items-center gap-1 text-amber-300 text-[10px]">
-              <Lock className="w-2.5 h-2.5" /> Sheet Locked
-            </span>
-          )}
-        </div>
-
-        {/* Right: actions */}
-        <div className="flex items-center gap-2 shrink-0">
-          {/* Window Buttons — always visible, solid colored */}
-          <Button
-            data-ocid="delivery.open_modal_button"
-            size="sm"
-            onClick={openDeliveryWindow}
-            className="h-8 text-xs gap-1.5 bg-blue-600 hover:bg-blue-700 text-white border-0"
-            title={
-              sheet?.locked
-                ? "View delivery entries (read-only)"
-                : "Open Delivery Entry Window"
-            }
-          >
-            <Truck className="w-3.5 h-3.5" />
-            Delivery
-          </Button>
-          <Button
-            data-ocid="transfer.open_modal_button"
-            size="sm"
-            onClick={openTransferWindow}
-            className="h-8 text-xs gap-1.5 bg-purple-600 hover:bg-purple-700 text-white border-0"
-            title={
-              sheet?.locked
-                ? "View transfer entries (read-only)"
-                : "Open Transfer Entry Window"
-            }
-          >
-            <LayoutList className="w-3.5 h-3.5" />
-            Transfer
-          </Button>
-          <Button
-            data-ocid="physical.open_modal_button"
-            size="sm"
-            onClick={openPhysicalWindow}
-            className="h-8 text-xs gap-1.5 bg-green-600 hover:bg-green-700 text-white border-0"
-            title={
-              sheet?.locked
-                ? "View physical entries (read-only)"
-                : "Open Physical Entry Window"
-            }
-          >
-            <Scale className="w-3.5 h-3.5" />
-            Physical
-          </Button>
-          <Button
-            data-ocid="poscount.open_modal_button"
-            size="sm"
-            onClick={openPosCountWindow}
-            className="h-8 text-xs gap-1.5 bg-sky-600 hover:bg-sky-700 text-white border-0"
-            title={
-              sheet?.locked
-                ? "View POS count entries (read-only)"
-                : "Open POS Count Entry Window"
-            }
-          >
-            <Receipt className="w-3.5 h-3.5" />
-            POS Count
-          </Button>
-          {/* Separator */}
-          <div className="w-px h-6 bg-white/20" />
+        {/* Row 2: Action buttons */}
+        <div className="flex items-center gap-1 flex-wrap">
+          {/* Reports group */}
           <Button
             data-ocid="sheet.print_button"
             size="sm"
             variant="outline"
             onClick={() => window.print()}
-            className="h-8 text-xs gap-1.5 border-white/30 text-white hover:bg-white/10 bg-transparent"
+            className="h-7 text-xs gap-1 border-white/30 text-white hover:bg-white/10 bg-transparent px-2"
           >
-            <Printer className="w-3.5 h-3.5" />
-            Print
+            <Printer className="w-3 h-3" />
+            <span className="hidden sm:inline">Print</span>
           </Button>
           <Button
             data-ocid="sheet.download_store_closing_button"
             size="sm"
             onClick={handleDownloadStoreClosingReport}
-            className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white border-0"
+            className="h-7 text-xs gap-1 bg-emerald-600 hover:bg-emerald-700 text-white border-0 px-2"
             title="Download Store Closing Report as CSV"
           >
-            <FileSpreadsheet className="w-3.5 h-3.5" />
-            Download Report
+            <FileSpreadsheet className="w-3 h-3" />
+            <span className="hidden sm:inline">Download</span>
+            <span className="hidden lg:inline"> Report</span>
           </Button>
-          {/* Run Report — always visible */}
           <Button
             data-ocid="sheet.run_report_button"
             size="sm"
@@ -1191,68 +1204,84 @@ export default function BPWSheet() {
               setRunReportStage("report");
               setShowRunReport(true);
             }}
-            className="h-8 text-xs gap-1.5 bg-indigo-500 hover:bg-indigo-600 text-white border-0"
+            className="h-7 text-xs gap-1 bg-indigo-500 hover:bg-indigo-600 text-white border-0 px-2"
           >
-            <BarChart2 className="w-3.5 h-3.5" />
-            Run Report
+            <BarChart2 className="w-3 h-3" />
+            <span className="hidden sm:inline">Run Report</span>
           </Button>
-          {/* Default Qty Set — always visible */}
+
+          <div className="w-px h-5 bg-white/20 mx-0.5" />
+
+          {/* Management group */}
           <Button
             data-ocid="sheet.default_qty_set_button"
             size="sm"
             variant="outline"
             onClick={() => setShowDefaultQtyDialog(true)}
-            className="h-8 text-xs gap-1.5 border-teal-400/60 text-teal-300 hover:bg-teal-500/10 bg-transparent"
+            className="h-7 text-xs gap-1 border-teal-400/60 text-teal-300 hover:bg-teal-500/10 bg-transparent px-2"
           >
-            <ClipboardList className="w-3.5 h-3.5" />
-            Default Qty Set
+            <ClipboardList className="w-3 h-3" />
+            <span className="hidden sm:inline">Default Qty</span>
           </Button>
+
           {sheet?.locked && (
             <Button
               data-ocid="sheet.admin_edit_button"
               size="sm"
               variant="outline"
               onClick={() => setShowAdminEditDialog(true)}
-              className="h-8 text-xs gap-1.5 border-emerald-400/60 text-emerald-300 hover:bg-emerald-500/10 bg-transparent"
+              className="h-7 text-xs gap-1 border-emerald-400/60 text-emerald-300 hover:bg-emerald-500/10 bg-transparent px-2"
             >
-              <LockOpen className="w-3.5 h-3.5" />
-              Admin Edit
+              <LockOpen className="w-3 h-3" />
+              <span className="hidden sm:inline">Admin Edit</span>
             </Button>
           )}
-          {!sheet?.locked && (
-            <Button
-              data-ocid="sheet.reset_button"
-              size="sm"
-              variant="outline"
-              onClick={() => setShowResetDialog(true)}
-              className="h-8 text-xs gap-1.5 border-red-400/50 text-red-300 hover:bg-red-500/10 bg-transparent"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              Reset Day
-            </Button>
-          )}
-          {!sheet?.locked && (
-            <Button
-              data-ocid="sheet.admin_reset_button"
-              size="sm"
-              variant="outline"
-              onClick={() => setShowAdminResetDialog(true)}
-              className="h-8 text-xs gap-1.5 border-orange-400/60 text-orange-300 hover:bg-orange-500/10 bg-transparent"
-            >
-              <ShieldAlert className="w-3.5 h-3.5" />
-              Admin Reset
-            </Button>
-          )}
+
           {!sheet?.locked && (
             <Button
               data-ocid="sheet.close_button"
               size="sm"
               onClick={() => setShowCloseDialog(true)}
-              className="h-8 text-xs gap-1.5 bg-amber-500 hover:bg-amber-600 text-white border-0"
+              className="h-7 text-xs gap-1 bg-amber-500 hover:bg-amber-600 text-white border-0 px-2"
             >
-              <Lock className="w-3.5 h-3.5" />
-              Close Day
+              <Lock className="w-3 h-3" />
+              <span className="hidden sm:inline">Close Day</span>
             </Button>
+          )}
+
+          {/* More actions dropdown (Reset Day, Admin Reset) */}
+          {!sheet?.locked && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs gap-1 border-white/30 text-white hover:bg-white/10 bg-transparent px-2"
+                  aria-label="More actions"
+                >
+                  <MoreVertical className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">More</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="z-50">
+                <DropdownMenuItem
+                  data-ocid="sheet.reset_button"
+                  onClick={() => setShowResetDialog(true)}
+                  className="text-red-600 focus:text-red-600 gap-2 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Reset Day
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  data-ocid="sheet.admin_reset_button"
+                  onClick={() => setShowAdminResetDialog(true)}
+                  className="text-orange-600 focus:text-orange-600 gap-2 cursor-pointer"
+                >
+                  <ShieldAlert className="w-3.5 h-3.5" />
+                  Admin Reset
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
         </div>
       </header>
@@ -2333,8 +2362,11 @@ export default function BPWSheet() {
         open={showDeliveryWindow}
         onOpenChange={(open) => setShowDeliveryWindow(open)}
       >
-        <DialogContent data-ocid="delivery.dialog" className="sm:max-w-2xl">
-          <DialogHeader>
+        <DialogContent
+          data-ocid="delivery.dialog"
+          className="w-[95vw] max-w-2xl max-h-[90vh] flex flex-col p-0 gap-0"
+        >
+          <DialogHeader className="px-5 pt-5 pb-3 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <img
                 src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
@@ -2351,14 +2383,14 @@ export default function BPWSheet() {
           </DialogHeader>
 
           {sheet?.locked && (
-            <div className="flex items-center gap-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+            <div className="mx-5 flex items-center gap-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800 shrink-0">
               <Lock className="w-3.5 h-3.5 shrink-0" />
               Day is closed. Open with Admin Edit to make changes.
             </div>
           )}
 
           {/* Column headers */}
-          <div className="flex items-center gap-2 px-3 pb-1 border-b border-border">
+          <div className="flex items-center gap-2 px-5 pb-1 border-b border-border shrink-0">
             <span className="text-xs font-semibold text-muted-foreground flex-1 min-w-0">
               Product
             </span>
@@ -2376,8 +2408,8 @@ export default function BPWSheet() {
             </span>
           </div>
 
-          <ScrollArea className="max-h-[55vh]">
-            <div className="pr-3">
+          <ScrollArea className="flex-1 overflow-y-auto">
+            <div className="px-5 py-1">
               {productNames.map((name, idx) => {
                 const cells = deliveryDraft[idx] ?? [0, 0, 0];
                 const rowTotal =
@@ -2494,7 +2526,7 @@ export default function BPWSheet() {
             </div>
           </ScrollArea>
 
-          <DialogFooter className="gap-2">
+          <DialogFooter className="gap-2 px-5 py-3 border-t border-border shrink-0 mt-0">
             {sheet?.locked ? (
               <Button
                 data-ocid="delivery.close_button"
@@ -2531,8 +2563,11 @@ export default function BPWSheet() {
         open={showTransferWindow}
         onOpenChange={(open) => setShowTransferWindow(open)}
       >
-        <DialogContent data-ocid="transfer.dialog" className="sm:max-w-2xl">
-          <DialogHeader>
+        <DialogContent
+          data-ocid="transfer.dialog"
+          className="w-[95vw] max-w-2xl max-h-[90vh] flex flex-col p-0 gap-0"
+        >
+          <DialogHeader className="px-5 pt-5 pb-3 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <img
                 src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
@@ -2549,14 +2584,14 @@ export default function BPWSheet() {
           </DialogHeader>
 
           {sheet?.locked && (
-            <div className="flex items-center gap-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+            <div className="mx-5 flex items-center gap-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800 shrink-0">
               <Lock className="w-3.5 h-3.5 shrink-0" />
               Day is closed. Open with Admin Edit to make changes.
             </div>
           )}
 
           {/* Column headers */}
-          <div className="flex items-center gap-2 px-3 pb-1 border-b border-border">
+          <div className="flex items-center gap-2 px-5 pb-1 border-b border-border shrink-0">
             <span className="text-xs font-semibold text-muted-foreground flex-1 min-w-0">
               Product
             </span>
@@ -2574,8 +2609,8 @@ export default function BPWSheet() {
             </span>
           </div>
 
-          <ScrollArea className="max-h-[55vh]">
-            <div className="pr-3">
+          <ScrollArea className="flex-1 overflow-y-auto">
+            <div className="px-5 py-1">
               {productNames.map((name, idx) => {
                 const cells = transferDraft[idx] ?? [0, 0, 0];
                 const rowTotal =
@@ -2692,7 +2727,7 @@ export default function BPWSheet() {
             </div>
           </ScrollArea>
 
-          <DialogFooter className="gap-2">
+          <DialogFooter className="gap-2 px-5 py-3 border-t border-border shrink-0 mt-0">
             {sheet?.locked ? (
               <Button
                 data-ocid="transfer.close_button"
@@ -2729,8 +2764,11 @@ export default function BPWSheet() {
         open={showPhysicalWindow}
         onOpenChange={(open) => setShowPhysicalWindow(open)}
       >
-        <DialogContent data-ocid="physical.dialog" className="sm:max-w-lg">
-          <DialogHeader>
+        <DialogContent
+          data-ocid="physical.dialog"
+          className="w-[95vw] max-w-lg max-h-[90vh] flex flex-col p-0 gap-0"
+        >
+          <DialogHeader className="px-5 pt-5 pb-3 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <img
                 src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
@@ -2746,14 +2784,14 @@ export default function BPWSheet() {
           </DialogHeader>
 
           {sheet?.locked && (
-            <div className="flex items-center gap-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+            <div className="mx-5 flex items-center gap-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800 shrink-0">
               <Lock className="w-3.5 h-3.5 shrink-0" />
               Day is closed. Open with Admin Edit to make changes.
             </div>
           )}
 
           {/* Column headers */}
-          <div className="flex items-center gap-2 px-3 pb-1 border-b border-border">
+          <div className="flex items-center gap-2 px-5 pb-1 border-b border-border shrink-0">
             <span className="text-xs font-semibold text-muted-foreground flex-1 min-w-0">
               Product
             </span>
@@ -2762,8 +2800,8 @@ export default function BPWSheet() {
             </span>
           </div>
 
-          <ScrollArea className="max-h-[55vh]">
-            <div className="pr-3">
+          <ScrollArea className="flex-1 overflow-y-auto">
+            <div className="px-5 py-1">
               {productNames.map((name, idx) => {
                 const val = physicalDraft[idx] ?? 0;
                 return (
@@ -2813,7 +2851,7 @@ export default function BPWSheet() {
             </div>
           </ScrollArea>
 
-          <DialogFooter className="gap-2">
+          <DialogFooter className="gap-2 px-5 py-3 border-t border-border shrink-0 mt-0">
             {sheet?.locked ? (
               <Button
                 data-ocid="physical.close_button"
@@ -2850,8 +2888,11 @@ export default function BPWSheet() {
         open={showPosCountWindow}
         onOpenChange={(open) => setShowPosCountWindow(open)}
       >
-        <DialogContent data-ocid="poscount.dialog" className="sm:max-w-lg">
-          <DialogHeader>
+        <DialogContent
+          data-ocid="poscount.dialog"
+          className="w-[95vw] max-w-lg max-h-[90vh] flex flex-col p-0 gap-0"
+        >
+          <DialogHeader className="px-5 pt-5 pb-3 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <img
                 src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
@@ -2867,14 +2908,14 @@ export default function BPWSheet() {
           </DialogHeader>
 
           {sheet?.locked && (
-            <div className="flex items-center gap-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+            <div className="mx-5 flex items-center gap-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800 shrink-0">
               <Lock className="w-3.5 h-3.5 shrink-0" />
               Day is closed. Open with Admin Edit to make changes.
             </div>
           )}
 
           {/* Column headers */}
-          <div className="flex items-center gap-2 px-3 pb-1 border-b border-border">
+          <div className="flex items-center gap-2 px-5 pb-1 border-b border-border shrink-0">
             <span className="text-xs font-semibold text-muted-foreground flex-1 min-w-0">
               Product
             </span>
@@ -2883,8 +2924,8 @@ export default function BPWSheet() {
             </span>
           </div>
 
-          <ScrollArea className="max-h-[55vh]">
-            <div className="pr-3">
+          <ScrollArea className="flex-1 overflow-y-auto">
+            <div className="px-5 py-1">
               {productNames.map((name, idx) => {
                 const val = posCountDraft[idx] ?? 0;
                 return (
@@ -2934,7 +2975,7 @@ export default function BPWSheet() {
             </div>
           </ScrollArea>
 
-          <DialogFooter className="gap-2">
+          <DialogFooter className="gap-2 px-5 py-3 border-t border-border shrink-0 mt-0">
             {sheet?.locked ? (
               <Button
                 data-ocid="poscount.close_button"
