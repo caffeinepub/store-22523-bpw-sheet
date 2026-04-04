@@ -245,8 +245,8 @@ export default function SheetTable({
                           <LayoutList className="w-3 h-3" />
                         </button>
                       </div>
-                      <span className="block text-[8px] font-normal normal-case tracking-normal text-info opacity-70">
-                        manual
+                      <span className="block text-[8px] font-normal normal-case tracking-normal text-blue-600 opacity-80 font-semibold">
+                        window only
                       </span>
                     </th>
                   );
@@ -286,8 +286,8 @@ export default function SheetTable({
                           <LayoutList className="w-3 h-3" />
                         </button>
                       </div>
-                      <span className="block text-[8px] font-normal normal-case tracking-normal text-info opacity-70">
-                        manual
+                      <span className="block text-[8px] font-normal normal-case tracking-normal text-blue-600 opacity-80 font-semibold">
+                        window only
                       </span>
                     </th>
                   );
@@ -350,23 +350,25 @@ export default function SheetTable({
                     <ReadCell value={row.opening} />
                   </td>
 
-                  {/* Col 3: Delivery – manual */}
-                  <td className="px-1 py-1 border border-border text-center bg-blue-50/50">
-                    <NumberInput
+                  {/* Col 3: Delivery – window only */}
+                  <td
+                    className="px-1 py-1 border border-border text-center bg-blue-50/30 cursor-not-allowed"
+                    title="Use Delivery Window to enter values"
+                  >
+                    <ReadCell
                       value={row.delivery}
-                      onChange={(v) => onCellChange(idx, "delivery", v)}
-                      disabled={locked}
-                      ocid={`sheet.delivery.${idx + 1}`}
+                      className="text-foreground/80"
                     />
                   </td>
 
-                  {/* Col 4: Transfer – manual */}
-                  <td className="px-1 py-1 border border-border text-center bg-blue-50/50">
-                    <NumberInput
+                  {/* Col 4: Transfer – window only */}
+                  <td
+                    className="px-1 py-1 border border-border text-center bg-blue-50/30 cursor-not-allowed"
+                    title="Use Transfer Window to enter values"
+                  >
+                    <ReadCell
                       value={row.transfer}
-                      onChange={(v) => onCellChange(idx, "transfer", v)}
-                      disabled={locked}
-                      ocid={`sheet.transfer.${idx + 1}`}
+                      className="text-foreground/80"
                     />
                   </td>
 
