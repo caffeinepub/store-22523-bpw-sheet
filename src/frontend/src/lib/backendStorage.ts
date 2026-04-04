@@ -1,6 +1,8 @@
 /**
- * Backend storage helpers — mirrors sheetStorage.ts API but uses ICP canister.
- * All data is stored on-chain so it's accessible from any device.
+ * Backend storage helpers — offline-first.
+ * All reads return from IndexedDB cache immediately.
+ * Writes go to IndexedDB first, then attempt canister sync.
+ * Failed canister writes are queued and retried when online.
  */
 
 import type {
@@ -28,6 +30,17 @@ import type {
   ReportRow as BackendReportRow,
 } from "../backend";
 import {
+  cacheAllSheets,
+  cacheProductNames,
+  cacheSheet,
+  dequeuePendingWrite,
+  enqueuePendingWrite,
+  getAllCachedSheets,
+  getAllPendingWrites,
+  getCachedProductNames,
+  getCachedSheet,
+} from "./offlineStorage";
+import {
   DEFAULT_PRODUCTS,
   calcTotalBA,
   calcTotalCounter,
@@ -41,7 +54,7 @@ import type {
   ProductRow,
 } from "./sheetStorage";
 
-// ── Type conversion: Frontend → Backend ─────────────────────────────────────
+// ── Type conversion: Frontend → Backend ──────────────────────────────────────────
 
 function toBackendNegativeEntry(e: NegativeEntry): BackendNegativeEntry {
   return {
@@ -93,7 +106,7 @@ function toBackendSheet(sheet: DailySheet): BackendDailySheet {
   };
 }
 
-// ── Type conversion: Backend → Frontend ─────────────────────────────────────
+// ── Type conversion: Backend → Frontend ──────────────────────────────────────────
 
 function fromBackendNegativeEntry(e: BackendNegativeEntry): NegativeEntry {
   return {
@@ -156,56 +169,182 @@ export function convertBackendSheet(bs: BackendDailySheet): DailySheet {
   };
 }
 
-// ── Backend storage API ──────────────────────────────────────────────────────
+// ── Offline-first Backend Storage API ──────────────────────────────────────────────
 
-/** Save a single sheet to backend */
+/**
+ * Save a single sheet.
+ * Writes to IndexedDB immediately (optimistic), then syncs to canister.
+ * If canister is unreachable, queues for later retry.
+ */
 export async function saveSheetToBackend(
   actor: backendInterface,
   sheet: DailySheet,
 ): Promise<void> {
-  await actor.saveSheet(toBackendSheet(sheet));
+  // 1. Write to local cache immediately
+  await cacheSheet(sheet);
+
+  // 2. Try canister write
+  try {
+    await actor.saveSheet(toBackendSheet(sheet));
+    // Remove any existing pending write for this date (now synced)
+    const pending = await getAllPendingWrites();
+    for (const op of pending) {
+      if (
+        op.type === "saveSheet" &&
+        (op.payload as DailySheet).date === sheet.date
+      ) {
+        await dequeuePendingWrite(op.id);
+      }
+    }
+  } catch {
+    // Queue for background sync
+    const existing = (await getAllPendingWrites()).find(
+      (op) =>
+        op.type === "saveSheet" &&
+        (op.payload as DailySheet).date === sheet.date,
+    );
+    if (existing) {
+      // Update existing pending write with latest data
+      await dequeuePendingWrite(existing.id);
+    }
+    await enqueuePendingWrite({
+      id: `saveSheet_${sheet.date}`,
+      type: "saveSheet",
+      payload: sheet,
+    });
+    // Don't throw — offline save succeeded
+  }
 }
 
-/** Load a single sheet from backend by date */
+/**
+ * Load a single sheet.
+ * Returns cached version immediately, refreshes from canister in background.
+ */
 export async function loadSheetFromBackend(
   actor: backendInterface,
   date: string,
 ): Promise<DailySheet | null> {
-  const result = await actor.loadSheet(date);
-  if (result === null || result === undefined) return null;
-  return convertBackendSheet(result);
+  // Return cached version
+  const cached = await getCachedSheet<DailySheet>(date);
+
+  // Refresh from canister in background (fire and forget)
+  actor
+    .loadSheet(date)
+    .then(async (result) => {
+      if (result != null) {
+        const sheet = convertBackendSheet(result);
+        await cacheSheet(sheet);
+      }
+    })
+    .catch(() => {
+      /* ignore, use cache */
+    });
+
+  return cached;
 }
 
-/** Load all sheets from backend */
+/**
+ * Load all sheets.
+ * Returns from IndexedDB cache immediately; syncs from canister in background.
+ */
 export async function loadAllSheetsFromBackend(
   actor: backendInterface,
 ): Promise<DailySheet[]> {
-  const entries = await actor.loadAllSheets();
-  return entries.map((e) => convertBackendSheet(e.value.sheet));
+  const cached = await getAllCachedSheets<DailySheet>();
+
+  // Background refresh
+  actor
+    .loadAllSheets()
+    .then(async (entries) => {
+      const sheets = entries.map((e) => convertBackendSheet(e.value.sheet));
+      await cacheAllSheets(sheets);
+    })
+    .catch(() => {
+      /* ignore, use cache */
+    });
+
+  return cached;
 }
 
-/** Save product names to backend */
+/**
+ * Save product names.
+ * Writes to IndexedDB immediately, then syncs to canister.
+ */
 export async function saveProductNamesToBackend(
   actor: backendInterface,
   names: string[],
 ): Promise<void> {
-  await actor.saveProductNames(names);
+  await cacheProductNames(names);
+
+  try {
+    await actor.saveProductNames(names);
+    // Remove pending write if any
+    const pending = await getAllPendingWrites();
+    for (const op of pending) {
+      if (op.type === "saveProductNames") {
+        await dequeuePendingWrite(op.id);
+      }
+    }
+  } catch {
+    const existing = (await getAllPendingWrites()).find(
+      (op) => op.type === "saveProductNames",
+    );
+    if (existing) await dequeuePendingWrite(existing.id);
+    await enqueuePendingWrite({
+      id: "saveProductNames",
+      type: "saveProductNames",
+      payload: names,
+    });
+  }
 }
 
-/** Load product names from backend, fall back to DEFAULT_PRODUCTS if empty */
+/**
+ * Load product names.
+ * Returns from IndexedDB cache; refreshes from canister in background.
+ */
 export async function loadProductNamesFromBackend(
   actor: backendInterface,
 ): Promise<string[]> {
-  const entries = await actor.loadProductNames();
-  if (!entries || entries.length === 0) {
-    // First-time setup: save defaults to backend
-    await actor.saveProductNames(DEFAULT_PRODUCTS);
+  const cached = await getCachedProductNames();
+
+  // Background refresh from canister
+  actor
+    .loadProductNames()
+    .then(async (entries) => {
+      if (entries && entries.length > 0) {
+        const names = entries
+          .sort((a, b) => Number(a.key.index - b.key.index))
+          .map((e) => e.value.name);
+        await cacheProductNames(names);
+      } else {
+        // First-time setup: push defaults to canister
+        await actor.saveProductNames(DEFAULT_PRODUCTS);
+        await cacheProductNames(DEFAULT_PRODUCTS);
+      }
+    })
+    .catch(() => {
+      /* ignore, use cache */
+    });
+
+  if (cached && cached.length > 0) return cached;
+
+  // No cache, try canister synchronously as fallback
+  try {
+    const entries = await actor.loadProductNames();
+    if (!entries || entries.length === 0) {
+      await actor.saveProductNames(DEFAULT_PRODUCTS);
+      await cacheProductNames(DEFAULT_PRODUCTS);
+      return [...DEFAULT_PRODUCTS];
+    }
+    const names = entries
+      .sort((a, b) => Number(a.key.index - b.key.index))
+      .map((e) => e.value.name);
+    await cacheProductNames(names);
+    return names;
+  } catch {
+    await cacheProductNames(DEFAULT_PRODUCTS);
     return [...DEFAULT_PRODUCTS];
   }
-  // Sort by index and extract names
-  return entries
-    .sort((a, b) => Number(a.key.index - b.key.index))
-    .map((e) => e.value.name);
 }
 
 /** Get the most recent locked sheet before a given date */
@@ -222,17 +361,42 @@ export async function getMostRecentLockedSheetFromBackend(
 
 /**
  * Get or create a sheet for a date.
- * If no sheet exists, carry forward from the most recent locked sheet.
+ * If no sheet exists locally, try canister, then carry forward from prev locked sheet.
  */
 export async function getOrCreateSheetFromBackend(
   actor: backendInterface,
   date: string,
   productNames: string[],
 ): Promise<DailySheet> {
-  const existing = await loadSheetFromBackend(actor, date);
-  if (existing) return existing;
+  // Check local cache first
+  const cached = await getCachedSheet<DailySheet>(date);
+  if (cached) {
+    // Background refresh from canister
+    actor
+      .loadSheet(date)
+      .then(async (result) => {
+        if (result != null) {
+          const sheet = convertBackendSheet(result);
+          await cacheSheet(sheet);
+        }
+      })
+      .catch(() => {});
+    return cached;
+  }
 
-  // Try to carry forward from the most recent locked sheet
+  // Try canister
+  try {
+    const result = await actor.loadSheet(date);
+    if (result != null) {
+      const sheet = convertBackendSheet(result);
+      await cacheSheet(sheet);
+      return sheet;
+    }
+  } catch {
+    // Canister unreachable — fall through to create from prev locked sheet
+  }
+
+  // Create new sheet from previous locked sheet (from cache)
   const prev = await getMostRecentLockedSheetFromBackend(actor, date);
 
   const rows = productNames.map((name, idx) => {
@@ -248,11 +412,76 @@ export async function getOrCreateSheetFromBackend(
   });
 
   const sheet: DailySheet = { date, rows, locked: false };
-  await saveSheetToBackend(actor, sheet);
+  // Save to both cache and canister
+  await cacheSheet(sheet);
+  actor.saveSheet(toBackendSheet(sheet)).catch(async () => {
+    await enqueuePendingWrite({
+      id: `saveSheet_${sheet.date}`,
+      type: "saveSheet",
+      payload: sheet,
+    });
+  });
   return sheet;
 }
 
-// ── Backup / Restore ─────────────────────────────────────────────────────────
+/**
+ * Flush all pending writes to canister.
+ * Called when coming online or on mount.
+ * Returns number of successfully flushed writes.
+ */
+export async function flushPendingWrites(
+  actor: backendInterface,
+): Promise<number> {
+  const pending = await getAllPendingWrites();
+  let flushed = 0;
+  for (const op of pending) {
+    try {
+      if (op.type === "saveSheet") {
+        await actor.saveSheet(toBackendSheet(op.payload as DailySheet));
+      } else if (op.type === "saveProductNames") {
+        await actor.saveProductNames(op.payload as string[]);
+      }
+      await dequeuePendingWrite(op.id);
+      flushed++;
+    } catch {
+      // Still offline — leave in queue
+      break;
+    }
+  }
+  return flushed;
+}
+
+/**
+ * Full data sync: load all sheets and product names from canister
+ * and update the local cache. Returns the refreshed data.
+ */
+export async function syncFromCanister(actor: backendInterface): Promise<{
+  productNames: string[];
+  sheets: DailySheet[];
+}> {
+  const [entries, allSheets] = await Promise.all([
+    actor.loadProductNames(),
+    actor.loadAllSheets(),
+  ]);
+
+  const sheets = allSheets.map((e) => convertBackendSheet(e.value.sheet));
+  await cacheAllSheets(sheets);
+
+  let names: string[];
+  if (!entries || entries.length === 0) {
+    await actor.saveProductNames(DEFAULT_PRODUCTS);
+    names = [...DEFAULT_PRODUCTS];
+  } else {
+    names = entries
+      .sort((a, b) => Number(a.key.index - b.key.index))
+      .map((e) => e.value.name);
+  }
+  await cacheProductNames(names);
+
+  return { productNames: names, sheets };
+}
+
+// ── Backup / Restore ──────────────────────────────────────────────────────────────────
 
 /** Download all data as a JSON backup file */
 export async function downloadBackup(actor: backendInterface): Promise<void> {

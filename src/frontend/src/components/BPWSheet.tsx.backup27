@@ -27,7 +27,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useActor } from "../hooks/useActor";
 import {
-  flushPendingWrites,
   getMostRecentLockedSheetFromBackend,
   getOrCreateSheetFromBackend,
   loadAllSheetsFromBackend,
@@ -36,7 +35,6 @@ import {
   saveSheetToBackend,
 } from "../lib/backendStorage";
 import { computeRow } from "../lib/calculations";
-import { cacheSheet, hasPendingWrites } from "../lib/offlineStorage";
 import {
   DEFAULT_PRODUCTS,
   type DailySheet,
@@ -192,9 +190,9 @@ export default function BPWSheet() {
     })),
     locked: false,
   }));
-  const [syncStatus, setSyncStatus] = useState<
-    "syncing" | "live" | "offline" | "queued"
-  >("syncing");
+  const [_syncStatus, setSyncStatus] = useState<"syncing" | "synced" | "error">(
+    "syncing",
+  );
   const [allDates, setAllDates] = useState<string[]>([]);
   const [lockedDates, setLockedDates] = useState<string[]>([]);
   const [showCloseDialog, setShowCloseDialog] = useState(false);
@@ -270,40 +268,55 @@ export default function BPWSheet() {
   // Sheet renders immediately with defaults; backend data updates it silently.
   // biome-ignore lint/correctness/useExhaustiveDependencies: productNames is stable after first load
   useEffect(() => {
-    if (actorFetching) {
-      setSyncStatus("syncing");
+    if (!actor || actorFetching) {
+      if (actorFetching) setSyncStatus("syncing");
       return;
     }
     let cancelled = false;
     (async () => {
       setSyncStatus("syncing");
       try {
-        if (actor) {
-          // Load product names and current sheet in parallel (cache-first, instant)
-          const [names, allSheets, loadedSheet] = await Promise.all([
-            loadProductNamesFromBackend(actor),
-            loadAllSheetsFromBackend(actor),
-            getOrCreateSheetFromBackend(actor, selectedDate, productNames),
-          ]);
-          if (!cancelled) {
-            setProductNames(names);
-            setAllDates(allSheets.map((sh) => sh.date));
-            setLockedDates(
-              allSheets.filter((sh) => sh.locked).map((sh) => sh.date),
-            );
-            setSheet(loadedSheet);
-          }
-        }
-        // After loading, check for pending writes to determine status
+        // Load product names and current sheet in parallel
+        const [names, allSheets, sheet] = await Promise.all([
+          loadProductNamesFromBackend(actor),
+          loadAllSheetsFromBackend(actor),
+          getOrCreateSheetFromBackend(actor, selectedDate, productNames),
+        ]);
         if (!cancelled) {
-          const pending = await hasPendingWrites();
-          setSyncStatus(pending ? "queued" : "live");
+          setProductNames(names);
+          setAllDates(allSheets.map((sh) => sh.date));
+          setLockedDates(
+            allSheets.filter((sh) => sh.locked).map((sh) => sh.date),
+          );
+          setSheet(sheet);
+          setSyncStatus("synced");
         }
       } catch (err) {
         console.error("Failed to load sheet:", err);
-        // Silently fall back — sheet already shows from default state
+        // Don't block the sheet -- just show a toast
         if (!cancelled) {
-          setSyncStatus("offline");
+          toast.error("Could not reach server. Using local defaults.");
+          setSyncStatus("error");
+          // Ensure sheet shows something usable even if server fails
+          setSheet(
+            (prev) =>
+              prev ?? {
+                date: selectedDate,
+                rows: productNames.map((name) => ({
+                  productName: name,
+                  opening: 0,
+                  delivery: 0,
+                  deliveryCells: [0, 0, 0] as [number, number, number],
+                  transfer: 0,
+                  transferCells: [0, 0, 0] as [number, number, number],
+                  openCounter: 0,
+                  physical: 0,
+                  additional: 0,
+                  posCount: 0,
+                })),
+                locked: false,
+              },
+          );
         }
       }
     })();
@@ -311,27 +324,6 @@ export default function BPWSheet() {
       cancelled = true;
     };
   }, [selectedDate, actor, actorFetching]);
-
-  // Flush pending writes on mount and when coming back online
-  useEffect(() => {
-    const tryFlush = async () => {
-      if (!actor) return;
-      try {
-        await flushPendingWrites(actor);
-        const pending = await hasPendingWrites();
-        setSyncStatus(pending ? "queued" : "live");
-      } catch {
-        // Still offline — keep current status
-      }
-    };
-
-    if (actor) {
-      tryFlush();
-    }
-
-    window.addEventListener("online", tryFlush);
-    return () => window.removeEventListener("online", tryFlush);
-  }, [actor]);
 
   // Helper to refresh allDates and lockedDates from backend
   const refreshDatesFromBackend = useCallback(async () => {
@@ -352,18 +344,17 @@ export default function BPWSheet() {
 
   const handleProductNameChange = useCallback(
     async (idx: number, newName: string) => {
+      if (!actor) return;
       const updatedNames = productNames.map((n, i) =>
         i === idx ? newName : n,
       );
       setProductNames(updatedNames);
       try {
-        if (actor) {
-          await saveProductNamesToBackend(actor, updatedNames);
-        }
-        const pending = await hasPendingWrites();
-        setSyncStatus(pending ? "queued" : "live");
+        await saveProductNamesToBackend(actor, updatedNames);
       } catch (err) {
         console.error("Failed to save product names:", err);
+        toast.error("Failed to save product name");
+        return;
       }
       setSheet((prev) => {
         if (!prev) return prev;
@@ -379,11 +370,7 @@ export default function BPWSheet() {
         );
         const updated: DailySheet = { ...sheet, rows: newRows };
         try {
-          if (actor) {
-            await saveSheetToBackend(actor, updated);
-          } else {
-            await cacheSheet(updated);
-          }
+          await saveSheetToBackend(actor, updated);
         } catch (err) {
           console.error("Failed to save sheet:", err);
         }
@@ -402,7 +389,7 @@ export default function BPWSheet() {
       >,
       value: string,
     ) => {
-      if (!sheet || sheet.locked) return;
+      if (!sheet || sheet.locked || !actor) return;
       const num = Math.max(0, Number.parseFloat(value) || 0);
       const newRows = sheet.rows.map((row, i) =>
         i === idx ? { ...row, [field]: num } : row,
@@ -410,22 +397,17 @@ export default function BPWSheet() {
       const updated: DailySheet = { ...sheet, rows: newRows };
       setSheet(updated);
       try {
-        if (actor) {
-          await saveSheetToBackend(actor, updated);
-        } else {
-          await cacheSheet(updated);
-        }
-        const pending = await hasPendingWrites();
-        setSyncStatus(pending ? "queued" : "live");
+        await saveSheetToBackend(actor, updated);
       } catch (err) {
         console.error("Failed to save sheet:", err);
+        toast.error("Failed to save changes");
       }
     },
     [sheet, actor],
   );
 
   const handleCloseDay = useCallback(async () => {
-    if (!sheet || sheet.locked) return;
+    if (!sheet || sheet.locked || !actor) return;
 
     // Lock the sheet — save finalized report at close time
     const report: FinalizedReportRow[] = buildCategoryReport(
@@ -437,13 +419,11 @@ export default function BPWSheet() {
       finalizedReport: report,
     };
     try {
-      if (actor) {
-        await saveSheetToBackend(actor, locked);
-      } else {
-        await cacheSheet(locked);
-      }
+      await saveSheetToBackend(actor, locked);
     } catch (err) {
       console.error("Failed to save locked sheet:", err);
+      toast.error("Failed to close day");
+      return;
     }
     setSheet(locked);
 
@@ -475,17 +455,10 @@ export default function BPWSheet() {
       locked: false,
     };
     try {
-      if (actor) {
-        await saveSheetToBackend(actor, nextSheet);
-      } else {
-        await cacheSheet(nextSheet);
-      }
+      await saveSheetToBackend(actor, nextSheet);
     } catch (err) {
       console.error("Failed to save next day sheet:", err);
     }
-
-    const pendingAfterClose = await hasPendingWrites();
-    setSyncStatus(pendingAfterClose ? "queued" : "live");
 
     await refreshDatesFromBackend();
     setShowCloseDialog(false);
@@ -496,7 +469,7 @@ export default function BPWSheet() {
   }, [sheet, selectedDate, actor, refreshDatesFromBackend]);
 
   const handleResetDay = useCallback(async () => {
-    if (!sheet || sheet.locked) return;
+    if (!sheet || sheet.locked || !actor) return;
 
     if (resetPassword !== "225231") {
       setResetPasswordError(true);
@@ -512,15 +485,11 @@ export default function BPWSheet() {
 
     const resetSheet: DailySheet = { ...sheet, rows: resetRows };
     try {
-      if (actor) {
-        await saveSheetToBackend(actor, resetSheet);
-      } else {
-        await cacheSheet(resetSheet);
-      }
-      const pending = await hasPendingWrites();
-      setSyncStatus(pending ? "queued" : "live");
+      await saveSheetToBackend(actor, resetSheet);
     } catch (err) {
       console.error("Failed to save reset sheet:", err);
+      toast.error("Failed to reset day");
+      return;
     }
     setSheet(resetSheet);
     setShowResetDialog(false);
@@ -532,7 +501,7 @@ export default function BPWSheet() {
 
   // Admin Reset: resets entire current open day to zero (all columns)
   const handleAdminReset = useCallback(async () => {
-    if (!sheet || sheet.locked) return;
+    if (!sheet || sheet.locked || !actor) return;
 
     if (adminResetPassword !== "9924827787") {
       setAdminResetPasswordError(true);
@@ -555,15 +524,11 @@ export default function BPWSheet() {
 
     const resetSheet: DailySheet = { ...sheet, rows: zeroRows };
     try {
-      if (actor) {
-        await saveSheetToBackend(actor, resetSheet);
-      } else {
-        await cacheSheet(resetSheet);
-      }
-      const pending = await hasPendingWrites();
-      setSyncStatus(pending ? "queued" : "live");
+      await saveSheetToBackend(actor, resetSheet);
     } catch (err) {
       console.error("Failed to save admin reset sheet:", err);
+      toast.error("Failed to perform admin reset");
+      return;
     }
     setSheet(resetSheet);
     setShowAdminResetDialog(false);
@@ -575,7 +540,7 @@ export default function BPWSheet() {
 
   // Admin Edit: unlock a closed/locked sheet for editing
   const handleAdminEdit = useCallback(async () => {
-    if (!sheet || !sheet.locked) return;
+    if (!sheet || !sheet.locked || !actor) return;
 
     if (adminEditPassword !== "9924827787") {
       setAdminEditPasswordError(true);
@@ -584,15 +549,11 @@ export default function BPWSheet() {
 
     const unlocked: DailySheet = { ...sheet, locked: false };
     try {
-      if (actor) {
-        await saveSheetToBackend(actor, unlocked);
-      } else {
-        await cacheSheet(unlocked);
-      }
-      const pending = await hasPendingWrites();
-      setSyncStatus(pending ? "queued" : "live");
+      await saveSheetToBackend(actor, unlocked);
     } catch (err) {
       console.error("Failed to save unlocked sheet:", err);
+      toast.error("Failed to unlock sheet");
+      return;
     }
     setSheet(unlocked);
     await refreshDatesFromBackend();
@@ -605,12 +566,10 @@ export default function BPWSheet() {
 
   // Default Qty Set: restore Opening & Open Counter from previous closed day's Total BA & Total Counter
   const handleDefaultQtySet = useCallback(async () => {
-    if (!sheet) return;
+    if (!sheet || !actor) return;
     let prev: DailySheet | null;
     try {
-      prev = actor
-        ? await getMostRecentLockedSheetFromBackend(actor, selectedDate)
-        : null;
+      prev = await getMostRecentLockedSheetFromBackend(actor, selectedDate);
     } catch (err) {
       console.error("Failed to get previous sheet:", err);
       toast.error("Failed to fetch previous day data");
@@ -629,15 +588,11 @@ export default function BPWSheet() {
     });
     const updated: DailySheet = { ...sheet, rows: updatedRows };
     try {
-      if (actor) {
-        await saveSheetToBackend(actor, updated);
-      } else {
-        await cacheSheet(updated);
-      }
-      const pending = await hasPendingWrites();
-      setSyncStatus(pending ? "queued" : "live");
+      await saveSheetToBackend(actor, updated);
     } catch (err) {
       console.error("Failed to save sheet:", err);
+      toast.error("Failed to save default quantities");
+      return;
     }
     setSheet(updated);
     setShowDefaultQtyDialog(false);
@@ -726,7 +681,7 @@ export default function BPWSheet() {
 
   // Save Delivery Window entries: sum 3 cells, store total + cells + reasons
   const saveDeliveryWindow = useCallback(async () => {
-    if (!sheet || sheet.locked) return;
+    if (!sheet || sheet.locked || !actor) return;
     const newRows = sheet.rows.map((row, i) => {
       const cells = deliveryDraft[i] ??
         row.deliveryCells ?? [row.delivery, 0, 0];
@@ -757,15 +712,11 @@ export default function BPWSheet() {
       negativeEntries,
     };
     try {
-      if (actor) {
-        await saveSheetToBackend(actor, updated);
-      } else {
-        await cacheSheet(updated);
-      }
-      const pending = await hasPendingWrites();
-      setSyncStatus(pending ? "queued" : "live");
+      await saveSheetToBackend(actor, updated);
     } catch (err) {
       console.error("Failed to save delivery entries:", err);
+      toast.error("Failed to save delivery quantities");
+      return;
     }
     setSheet(updated);
     setShowDeliveryWindow(false);
@@ -775,7 +726,7 @@ export default function BPWSheet() {
 
   // Save Transfer Window entries: sum 3 cells, store total + cells + reasons
   const saveTransferWindow = useCallback(async () => {
-    if (!sheet || sheet.locked) return;
+    if (!sheet || sheet.locked || !actor) return;
     const newRows = sheet.rows.map((row, i) => {
       const cells = transferDraft[i] ??
         row.transferCells ?? [row.transfer, 0, 0];
@@ -806,15 +757,11 @@ export default function BPWSheet() {
       negativeEntries,
     };
     try {
-      if (actor) {
-        await saveSheetToBackend(actor, updated);
-      } else {
-        await cacheSheet(updated);
-      }
-      const pending = await hasPendingWrites();
-      setSyncStatus(pending ? "queued" : "live");
+      await saveSheetToBackend(actor, updated);
     } catch (err) {
       console.error("Failed to save transfer entries:", err);
+      toast.error("Failed to save transfer quantities");
+      return;
     }
     setSheet(updated);
     setShowTransferWindow(false);
@@ -922,24 +869,9 @@ export default function BPWSheet() {
             <h1 className="text-white font-bold text-sm leading-none">
               Store 22523
             </h1>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <p className="text-white/60 text-[10px]">BPW Daily Sheet · v27</p>
-              <span
-                className={cn(
-                  "w-2 h-2 rounded-full shrink-0",
-                  syncStatus === "syncing" && "bg-yellow-400 animate-pulse",
-                  syncStatus === "live" && "bg-green-400",
-                  syncStatus === "offline" && "bg-red-400",
-                  syncStatus === "queued" && "bg-amber-400 animate-pulse",
-                )}
-              />
-              <span className="text-[9px] text-white/50">
-                {syncStatus === "syncing" && "Syncing..."}
-                {syncStatus === "live" && "Live"}
-                {syncStatus === "offline" && "Offline"}
-                {syncStatus === "queued" && "Pending sync"}
-              </span>
-            </div>
+            <p className="text-white/60 text-[10px] mt-0.5">
+              BPW Daily Sheet · v24
+            </p>
           </div>
         </div>
 
