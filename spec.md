@@ -1,24 +1,25 @@
-# Store 22523 BPW Sheet — Version 21 Fix
+# Store 22523 BPW Sheet
 
 ## Current State
-- Version 20 deployed with Delivery/Transfer columns locked (entries via windows only)
-- Database backup (download) and restore (upload) in sidebar panel
-- All data stored on ICP blockchain canister
-- App loads sheet data from canister on every date change
+The app has a Database Backup / Restore section in BPWSheet.tsx sidebar panel including a Download Backup button, Restore Backup file input, confirmation dialog with admin password, and related state/imports.
 
 ## Requested Changes (Diff)
 
 ### Add
-- Nothing new
+- Nothing
 
 ### Modify
-- **Fix backup download**: The `downloadBackup` function in `backendStorage.ts` casts actor to `backendWithBackup` unnecessarily — `exportAllData` is already declared in `backend.d.ts` on `backendInterface`. The BigInt replacer in JSON.stringify works but the restore path needs to properly convert numeric values back to BigInt for `productIndex` and `cellIndex` fields in `NegativeEntry`.
-- **Fix restore**: When restoring a JSON backup, `productIndex` and `cellIndex` in `NegativeEntry` are stored as numbers in JSON but the canister expects `bigint`. The `convert` function in `restoreBackup` does not convert them to BigInt. This causes the restore call to fail silently or throw.
-- **Fix slow loading / buffering**: The sheet load `useEffect` in `BPWSheet.tsx` calls `loadProductNamesFromBackend` AND `loadAllSheetsFromBackend` on every date change. This is 3 separate canister round-trips per date change. Optimize by: (1) only loading product names once (already done in the product names effect), passing them to getOrCreateSheet instead of re-fetching; (2) caching the list of all sheet dates in a ref after first fetch so `loadAllSheetsFromBackend` is not called every time a date is selected — only dates list needs refreshing, not all sheet data.
+- BPWSheet.tsx: Remove all backup/restore UI, state variables, and imports
 
 ### Remove
-- Redundant `backendWithBackup` interface in `backendStorage.ts` (use `backendInterface` directly which already has those methods)
+- Database Backup card JSX block (lines ~1073-1140)
+- Restore Backup Confirmation Dialog JSX block (lines ~2440-2565)
+- State variables: backupLoading, restoreDialogOpen, restoreFile, restorePassword, restoreLoading
+- Imports: downloadBackup, restoreBackup
 
 ## Implementation Plan
-1. In `backendStorage.ts`: remove `backendWithBackup` interface, use `backendInterface` directly in `downloadBackup` and `restoreBackup`. Fix the restore `convert` function to correctly convert `productIndex` and `cellIndex` to `BigInt`.
-2. In `BPWSheet.tsx`: fix the sheet load `useEffect` to NOT re-call `loadProductNamesFromBackend` — use the already-loaded `productNames` state. Also add a `refreshDatesFromBackend` helper that only fetches dates+locked status, not full sheet data. Reduce canister calls on date change from 3 down to 1-2.
+1. Remove downloadBackup and restoreBackup imports
+2. Remove 5 backup/restore state variable declarations
+3. Remove Database Backup Card JSX from sidebar panel
+4. Remove Restore Backup Confirmation Dialog JSX near bottom of component
+5. Validate
