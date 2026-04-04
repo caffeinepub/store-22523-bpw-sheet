@@ -13,6 +13,7 @@ import {
   BarChart2,
   CalendarIcon,
   ClipboardList,
+  Database,
   Download,
   LayoutList,
   Lock,
@@ -27,10 +28,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useActor } from "../hooks/useActor";
 import {
+  downloadBackup,
   getMostRecentLockedSheetFromBackend,
   getOrCreateSheetFromBackend,
   loadAllSheetsFromBackend,
   loadProductNamesFromBackend,
+  restoreBackup,
   saveProductNamesToBackend,
   saveSheetToBackend,
 } from "../lib/backendStorage";
@@ -220,6 +223,12 @@ export default function BPWSheet() {
   const [reasonDraft, setReasonDraft] = useState("");
   // Negative reasons for current window draft (key: "type_idx_cell")
   const [draftReasons, setDraftReasons] = useState<Record<string, string>>({});
+  // Database Backup state
+  const [backupLoading, setBackupLoading] = useState(false);
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
+  const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const [restorePassword, setRestorePassword] = useState("");
+  const [restoreLoading, setRestoreLoading] = useState(false);
   // PWA install banner state
   const [showInstallBanner, setShowInstallBanner] = useState<boolean>(() => {
     return localStorage.getItem("pwa-banner-dismissed") !== "1";
@@ -1038,6 +1047,77 @@ export default function BPWSheet() {
                     </p>
                   </div>
                 )}
+
+                {/* ─── Database Backup Card ─── */}
+                <div className="bg-card border border-border rounded-lg overflow-hidden">
+                  <div className="px-3 py-2 border-b border-border bg-muted/30 flex items-center gap-1.5">
+                    <Database className="w-3 h-3 text-primary" />
+                    <span className="text-[10px] font-bold text-foreground uppercase tracking-wide">
+                      Database Backup
+                    </span>
+                  </div>
+                  <div className="p-2.5 flex flex-col gap-2">
+                    {/* Download Backup */}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      data-ocid="backup.download_button"
+                      disabled={backupLoading || !actor}
+                      className="w-full h-7 text-[11px] gap-1.5"
+                      onClick={async () => {
+                        if (!actor) return;
+                        setBackupLoading(true);
+                        try {
+                          await downloadBackup(actor);
+                          toast.success("Backup downloaded successfully");
+                        } catch {
+                          toast.error("Failed to download backup");
+                        } finally {
+                          setBackupLoading(false);
+                        }
+                      }}
+                    >
+                      {backupLoading ? (
+                        <>
+                          <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                          Downloading...
+                        </>
+                      ) : (
+                        <>
+                          <Download className="w-3 h-3" />
+                          Download Backup
+                        </>
+                      )}
+                    </Button>
+
+                    {/* Restore Backup */}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      data-ocid="backup.upload_button"
+                      disabled={!actor}
+                      className="w-full h-7 text-[11px] gap-1.5 text-amber-600 border-amber-200 hover:bg-amber-50 hover:text-amber-700"
+                      onClick={() => {
+                        const input = document.createElement("input");
+                        input.type = "file";
+                        input.accept = ".json";
+                        input.onchange = (e) => {
+                          const file = (e.target as HTMLInputElement)
+                            .files?.[0];
+                          if (file) {
+                            setRestoreFile(file);
+                            setRestorePassword("");
+                            setRestoreDialogOpen(true);
+                          }
+                        };
+                        input.click();
+                      }}
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      Restore Backup
+                    </Button>
+                  </div>
+                </div>
               </motion.aside>
             </>
           )}
@@ -2306,6 +2386,135 @@ export default function BPWSheet() {
                 </Button>
               </>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Restore Backup Confirmation Dialog ─── */}
+      <Dialog
+        open={restoreDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRestoreDialogOpen(false);
+            setRestoreFile(null);
+            setRestorePassword("");
+          }
+        }}
+      >
+        <DialogContent data-ocid="backup.dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <img
+                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                alt=""
+                className="w-6 h-6 object-contain opacity-80"
+              />
+              <Database className="w-5 h-5 text-amber-500" />
+              Restore Database Backup
+            </DialogTitle>
+            <DialogDescription className="pt-1 space-y-1">
+              <span className="block font-semibold text-destructive">
+                ⚠️ This will overwrite ALL current data. This cannot be undone.
+              </span>
+              <span className="block text-muted-foreground text-xs">
+                File: {restoreFile?.name ?? "—"}
+              </span>
+              <span className="block text-muted-foreground text-xs">
+                Enter the admin password to confirm.
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <label
+              htmlFor="restore-password"
+              className="text-sm font-medium text-foreground block mb-1.5"
+            >
+              Admin Password
+            </label>
+            <input
+              id="restore-password"
+              data-ocid="backup.input"
+              type="password"
+              value={restorePassword}
+              onChange={(e) => setRestorePassword(e.target.value)}
+              onKeyDown={(e) => {
+                if (
+                  e.key === "Enter" &&
+                  restorePassword === "9924827787" &&
+                  restoreFile &&
+                  actor &&
+                  !restoreLoading
+                ) {
+                  (async () => {
+                    setRestoreLoading(true);
+                    try {
+                      await restoreBackup(actor, restoreFile);
+                      toast.success(
+                        "Backup restored successfully. Reloading...",
+                      );
+                      setTimeout(() => window.location.reload(), 1200);
+                    } catch {
+                      toast.error(
+                        "Failed to restore backup. Check the file format.",
+                      );
+                      setRestoreLoading(false);
+                    }
+                  })();
+                }
+              }}
+              placeholder="Enter admin password"
+              className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              data-ocid="backup.cancel_button"
+              variant="outline"
+              disabled={restoreLoading}
+              onClick={() => {
+                setRestoreDialogOpen(false);
+                setRestoreFile(null);
+                setRestorePassword("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              data-ocid="backup.confirm_button"
+              disabled={
+                restorePassword !== "9924827787" ||
+                !restoreFile ||
+                !actor ||
+                restoreLoading
+              }
+              className="bg-amber-500 hover:bg-amber-600 text-white"
+              onClick={async () => {
+                if (!actor || !restoreFile) return;
+                setRestoreLoading(true);
+                try {
+                  await restoreBackup(actor, restoreFile);
+                  toast.success("Backup restored successfully. Reloading...");
+                  setTimeout(() => window.location.reload(), 1200);
+                } catch {
+                  toast.error(
+                    "Failed to restore backup. Check the file format.",
+                  );
+                  setRestoreLoading(false);
+                }
+              }}
+            >
+              {restoreLoading ? (
+                <>
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-1.5" />
+                  Restoring...
+                </>
+              ) : (
+                <>
+                  <Database className="w-4 h-4 mr-1.5" />
+                  Confirm Restore
+                </>
+              )}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -59,6 +59,10 @@ export interface SheetValue {
 export interface ProductNameValue {
     name: string;
 }
+export interface FullBackup {
+    sheets: Array<SheetEntry>;
+    productNames: Array<ProductNameEntry>;
+}
 export interface backendInterface {
     getNegativeEntries(date: string): Promise<Array<NegativeEntry> | null>;
     getProductName(index: bigint): Promise<string | null>;
@@ -68,4 +72,6 @@ export interface backendInterface {
     lockSheet(date: string): Promise<boolean>;
     saveProductNames(names: Array<string>): Promise<void>;
     saveSheet(sheet: DailySheet): Promise<void>;
+    exportAllData(): Promise<FullBackup>;
+    importAllData(backup: FullBackup): Promise<void>;
 }

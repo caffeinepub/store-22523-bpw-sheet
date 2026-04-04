@@ -4,6 +4,17 @@
  */
 
 import type { backendInterface } from "../backend";
+
+// Extended interface for backup operations (new backend methods)
+export interface FullBackup {
+  sheets: Array<import("../backend").SheetEntry>;
+  productNames: Array<import("../backend").ProductNameEntry>;
+}
+
+interface backendWithBackup extends backendInterface {
+  exportAllData(): Promise<FullBackup>;
+  importAllData(backup: FullBackup): Promise<void>;
+}
 import type {
   DailySheet as BackendDailySheet,
   NegativeEntry as BackendNegativeEntry,
@@ -233,4 +244,49 @@ export async function getOrCreateSheetFromBackend(
   const sheet: DailySheet = { date, rows, locked: false };
   await saveSheetToBackend(actor, sheet);
   return sheet;
+}
+
+// ── Backup / Restore ─────────────────────────────────────────────────────────
+
+/** Download all data as a JSON backup file */
+export async function downloadBackup(actor: backendInterface): Promise<void> {
+  const backupActor = actor as backendWithBackup;
+  const backup = await backupActor.exportAllData();
+  const json = JSON.stringify(
+    backup,
+    (_, v) => (typeof v === "bigint" ? Number(v) : v),
+    2,
+  );
+  const blob = new Blob([json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const today = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `bpw-backup-${today}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** Restore data from a JSON backup file — overwrites all existing data */
+export async function restoreBackup(
+  actor: backendInterface,
+  file: File,
+): Promise<void> {
+  const backupActor = actor as backendWithBackup;
+  const text = await file.text();
+  const backup = JSON.parse(text);
+  // Convert any number-typed bigints back
+  const convert = (obj: unknown): unknown => {
+    if (Array.isArray(obj)) return obj.map(convert);
+    if (obj && typeof obj === "object") {
+      return Object.fromEntries(
+        Object.entries(obj as Record<string, unknown>).map(([k, v]) => [
+          k,
+          convert(v),
+        ]),
+      );
+    }
+    return obj;
+  };
+  await backupActor.importAllData(convert(backup) as FullBackup);
 }

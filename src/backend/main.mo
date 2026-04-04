@@ -5,9 +5,9 @@ import List "mo:core/List";
 import Float "mo:core/Float";
 import Array "mo:core/Array";
 import Order "mo:core/Order";
-import Migration "migration";
 
-(with migration = Migration.run)
+
+
 actor {
   public type ProductRow = {
     productName : Text;
@@ -69,6 +69,12 @@ actor {
   public type ProductNameEntry = {
     key : ProductNameKey;
     value : ProductNameValue;
+  };
+
+  // Full export/import payload
+  public type FullBackup = {
+    sheets : [SheetEntry];
+    productNames : [ProductNameEntry];
   };
 
   // Persistent storage: use Maps
@@ -148,5 +154,32 @@ actor {
       case (null) { false };
     };
   };
-};
 
+  // Export all data (sheets + product names) as a single backup payload
+  public query ({ caller }) func exportAllData() : async FullBackup {
+    let sheetEntries = List.empty<SheetEntry>();
+    for ((k, v) in sheetMap.entries()) {
+      sheetEntries.add({ key = { date = k }; value = { sheet = v } });
+    };
+    let sortedSheets = sheetEntries.toArray().sort(compareEntries);
+
+    let nameEntries = List.empty<ProductNameEntry>();
+    for ((k, v) in productNamesMap.entries()) {
+      nameEntries.add({ key = { index = k }; value = v });
+    };
+
+    { sheets = sortedSheets; productNames = nameEntries.toArray() };
+  };
+
+  // Import / restore all data — overwrites existing sheets and product names
+  public shared ({ caller }) func importAllData(backup : FullBackup) : async () {
+    // Restore sheets
+    for (entry in backup.sheets.vals()) {
+      sheetMap.add(entry.key.date, entry.value.sheet);
+    };
+    // Restore product names
+    for (entry in backup.productNames.vals()) {
+      productNamesMap.add(entry.key.index, entry.value);
+    };
+  };
+};
