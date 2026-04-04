@@ -192,6 +192,11 @@ export default function BPWSheet() {
   const [slicerOpen, setSlicerOpen] = useState(false);
   // Editable product names – loaded from backend
   const [productNames, setProductNames] = useState<string[]>(DEFAULT_PRODUCTS);
+  // Whether product names have been loaded from the backend (prevents loading sheet with stale defaults)
+  const [productNamesReady, setProductNamesReady] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [loadError, setLoadError] = useState<boolean>(false);
+  const [retryCount, setRetryCount] = useState<number>(0);
   // Run Report state
   const [showRunReport, setShowRunReport] = useState(false);
   const [runReportStage, setRunReportStage] = useState<"report" | "finalize">(
@@ -246,60 +251,70 @@ export default function BPWSheet() {
     return () => window.removeEventListener("beforeinstallprompt", handler);
   }, []);
 
-  // Load sheet + product names when date or actor changes.
-  // Sheet renders immediately with defaults; backend data updates it silently.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: productNames is stable after first load
+  // One-time initialization: load product names + all dates when actor is ready
+  // biome-ignore lint/correctness/useExhaustiveDependencies: retryCount is a manual trigger
   useEffect(() => {
     if (!actor || actorFetching) return;
     let cancelled = false;
     (async () => {
       try {
-        // Load product names and current sheet in parallel
-        const [names, allSheets, sheet] = await Promise.all([
+        const [names, allSheets] = await Promise.all([
           loadProductNamesFromBackend(actor),
           loadAllSheetsFromBackend(actor),
-          getOrCreateSheetFromBackend(actor, selectedDate, productNames),
         ]);
         if (!cancelled) {
           setProductNames(names);
+          setProductNamesReady(true);
           setAllDates(allSheets.map((sh) => sh.date));
           setLockedDates(
             allSheets.filter((sh) => sh.locked).map((sh) => sh.date),
           );
-          setSheet(sheet);
         }
       } catch (err) {
-        console.error("Failed to load sheet:", err);
-        // Don't block the sheet -- just show a toast
+        console.error("Failed to initialize data:", err);
         if (!cancelled) {
-          toast.error("Could not reach server. Using local defaults.");
-          // Ensure sheet shows something usable even if server fails
-          setSheet(
-            (prev) =>
-              prev ?? {
-                date: selectedDate,
-                rows: productNames.map((name) => ({
-                  productName: name,
-                  opening: 0,
-                  delivery: 0,
-                  deliveryCells: [0, 0, 0] as [number, number, number],
-                  transfer: 0,
-                  transferCells: [0, 0, 0] as [number, number, number],
-                  openCounter: 0,
-                  physical: 0,
-                  additional: 0,
-                  posCount: 0,
-                })),
-                locked: false,
-              },
+          toast.error(
+            "Failed to load data from server. Tap 'Try Again' to retry.",
           );
+          setProductNamesReady(true); // use defaults so sheet load can proceed
+          setLoadError(true);
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [selectedDate, actor, actorFetching]);
+  }, [actor, actorFetching, retryCount]);
+
+  // Load sheet when date changes (uses already-loaded productNames)
+  useEffect(() => {
+    if (!actor || actorFetching || !productNamesReady) return;
+    let cancelled = false;
+    setIsLoading(true);
+    (async () => {
+      try {
+        const s = await getOrCreateSheetFromBackend(
+          actor,
+          selectedDate,
+          productNames,
+        );
+        if (!cancelled) {
+          setSheet(s);
+          setIsLoading(false);
+        }
+      } catch (err) {
+        console.error("Failed to load sheet:", err);
+        if (!cancelled) {
+          toast.error("Failed to load sheet data. Tap 'Try Again' to retry.");
+          setIsLoading(false);
+          setLoadError(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDate, actor, actorFetching, productNames, productNamesReady]);
 
   // Helper to refresh allDates and lockedDates from backend
   const refreshDatesFromBackend = useCallback(async () => {
@@ -1094,7 +1109,40 @@ export default function BPWSheet() {
             </div>
           </div>
 
-          {sheet ? (
+          {isLoading || !sheet ? (
+            <div
+              data-ocid="sheet.loading_state"
+              className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground"
+            >
+              {loadError ? (
+                <>
+                  <p className="text-sm font-medium text-destructive">
+                    Failed to load sheet data.
+                  </p>
+                  <p className="text-xs text-center max-w-xs">
+                    Check your internet connection and try again.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLoadError(false);
+                      setProductNamesReady(false);
+                      setIsLoading(true);
+                      setRetryCount((c) => c + 1);
+                    }}
+                    className="mt-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+                  >
+                    Try Again
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  <p className="text-sm">Loading sheet data...</p>
+                </>
+              )}
+            </div>
+          ) : (
             <SheetTable
               computedRows={computedRows}
               locked={sheet.locked}
@@ -1104,14 +1152,6 @@ export default function BPWSheet() {
               onOpenDeliveryWindow={openDeliveryWindow}
               onOpenTransferWindow={openTransferWindow}
             />
-          ) : (
-            <div
-              data-ocid="sheet.loading_state"
-              className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground"
-            >
-              <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-              <p className="text-sm">Loading sheet...</p>
-            </div>
           )}
 
           {/* ─── Finalized Report Section ─── */}
