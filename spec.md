@@ -1,22 +1,30 @@
 # Store 22523 BPW Sheet
 
 ## Current State
-Data is saved directly to the ICP canister (update calls). Reading is done via ICP `query` calls which are fast but non-certified — they hit a single replica node that may lag behind the latest committed state. The polling interval is 15 seconds. There is no refresh triggered when the user returns to the app on their device.
+v36/v37 app with direct-to-canister saving, 5s polling. The sync indicator had 4 states: syncing (yellow), live (green), error (red - Save Error), load-error (orange - Offline). Any transient load failure set 'Offline' permanently until page reload. Save failures showed alarming 'Save Error' red dot and toast.error messages. guardedSave had no retry logic.
 
 ## Requested Changes (Diff)
 
 ### Add
-- `visibilitychange` event listener: when the user returns to the tab/app (document becomes visible), immediately re-fetch the sheet and product names from the canister so the phone always shows fresh data the moment staff open the app
-- `focus` event listener on window for the same reason
+- Auto-retry logic in guardedSave: up to 5 attempts with 2s delay between each before throwing
+- On load failure: keep dot yellow (Connecting...) instead of turning red/orange, rely on 5s poll to recover
 
 ### Modify
-- Reduce poll interval from 15 seconds to 5 seconds so cross-device updates appear faster
-- After any successful save, trigger an immediate re-fetch (to confirm data round-trips correctly and update the local state with the canonical canister version)
+- syncStatus type: remove 'load-error' state entirely (merged into 'syncing')
+- Status dot: 'error' state now shows yellow pulsing 'Retrying...' instead of red 'Save Error'
+- All setSyncStatus('error') → setSyncStatus('syncing') in catch blocks
+- All alarming toast.error for save failures → gentle toast.warning (retrying automatically)
+- Version label: v36 → v38
 
 ### Remove
-- Nothing removed
+- 'Offline' text from header
+- 'Save Error' text from header
+- Red/orange dot states
 
 ## Implementation Plan
-1. In `BPWSheet.tsx`, reduce `POLL_INTERVAL` from `15_000` to `5_000`
-2. Add a `useEffect` that listens to `document.addEventListener('visibilitychange', ...)` and `window.addEventListener('focus', ...)` — when triggered and `document.visibilityState === 'visible'`, call `loadSheetFromBackend` and update state immediately
-3. After each successful `guardedSave`, re-fetch the sheet and update state to confirm the canister round-trip
+1. Fix syncStatus type union (remove load-error)
+2. Replace guardedSave with retry-capable version (5 retries, 2s delay)
+3. All catch blocks: setSyncStatus syncing instead of error
+4. Soften toast messages to warning instead of error
+5. Status indicator: yellow = connecting/retrying, green = live, never shows red
+6. Version bump to v38

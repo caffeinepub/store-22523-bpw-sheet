@@ -208,9 +208,9 @@ export default function BPWSheet() {
     })),
     locked: false,
   }));
-  const [syncStatus, setSyncStatus] = useState<"syncing" | "live" | "error">(
-    "syncing",
-  );
+  const [syncStatus, setSyncStatus] = useState<
+    "syncing" | "live" | "error" | "load-error"
+  >("syncing");
   const [allDates, setAllDates] = useState<string[]>([]);
   const [lockedDates, setLockedDates] = useState<string[]>([]);
   const [showCloseDialog, setShowCloseDialog] = useState(false);
@@ -327,9 +327,8 @@ export default function BPWSheet() {
       } catch (err) {
         console.error("Failed to load sheet:", err);
         // Silently fall back — sheet already shows from default state
-        // Keep status as "syncing" so the dot stays yellow (retrying), not red/orange
         if (!cancelled) {
-          setSyncStatus("syncing");
+          setSyncStatus("load-error");
         }
       }
     })();
@@ -341,9 +340,8 @@ export default function BPWSheet() {
   // Track whether a save is in progress so polling doesn't overwrite it
   const isSavingRef = useRef(false);
 
-  // Guarded save with auto-retry: sets isSavingRef around every canister write so live polling
+  // Guarded save: sets isSavingRef around every canister write so live polling
   // doesn't overwrite a save that is currently in flight.
-  // Retries up to 5 times with 2-second delay before throwing.
   // Stored in a ref so it is always stable and never needs to appear in dep arrays.
   const guardedSaveRef = useRef(
     async (
@@ -351,23 +349,11 @@ export default function BPWSheet() {
       sheetArg: Parameters<typeof saveSheetToBackend>[1],
     ) => {
       isSavingRef.current = true;
-      const MAX_RETRIES = 5;
-      let lastErr: unknown;
-      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        try {
-          await saveSheetToBackend(actorArg, sheetArg);
-          isSavingRef.current = false;
-          return; // success
-        } catch (err) {
-          lastErr = err;
-          console.warn(`Save attempt ${attempt + 1} failed, retrying...`, err);
-          if (attempt < MAX_RETRIES - 1) {
-            await new Promise((res) => setTimeout(res, 2000));
-          }
-        }
+      try {
+        await saveSheetToBackend(actorArg, sheetArg);
+      } finally {
+        isSavingRef.current = false;
       }
-      isSavingRef.current = false;
-      throw lastErr; // only throw after all retries exhausted
     },
   );
   const guardedSave = guardedSaveRef.current;
@@ -453,10 +439,8 @@ export default function BPWSheet() {
         setSyncStatus("live");
       } catch (err) {
         console.error("Failed to save product names:", err);
-        setSyncStatus("syncing");
-        toast.warning(
-          "Could not reach server. Your entry is kept and will sync automatically.",
-        );
+        setSyncStatus("error");
+        toast.error("Save failed. Please check your connection and try again.");
       }
       setSheet((prev) => {
         if (!prev) return prev;
@@ -477,9 +461,17 @@ export default function BPWSheet() {
           }
         } catch (err) {
           console.error("Failed to save sheet:", err);
-          setSyncStatus("syncing");
-          toast.warning(
-            "Could not reach server. Your entry is kept and will sync automatically.",
+          setSyncStatus("error");
+          toast.error(
+            "Save failed. Please check your connection and try again.",
+          );
+          setSyncStatus("error");
+          toast.error(
+            "Save failed. Please check your connection and try again.",
+          );
+          setSyncStatus("error");
+          toast.error(
+            "Save failed. Please check your connection and try again.",
           );
         }
       }
@@ -512,10 +504,8 @@ export default function BPWSheet() {
         setSyncStatus("live");
       } catch (err) {
         console.error("Failed to save sheet:", err);
-        setSyncStatus("syncing");
-        toast.warning(
-          "Could not reach server. Your entry is kept and will sync automatically.",
-        );
+        setSyncStatus("error");
+        toast.error("Save failed. Please check your connection and try again.");
       }
     },
     [sheet, actor],
@@ -540,10 +530,8 @@ export default function BPWSheet() {
       }
     } catch (err) {
       console.error("Failed to save locked sheet:", err);
-      setSyncStatus("syncing");
-      toast.warning(
-        "Could not reach server. Your entry is kept and will sync automatically.",
-      );
+      setSyncStatus("error");
+      toast.error("Save failed. Please check your connection and try again.");
     }
     setSheet(locked);
 
@@ -580,10 +568,8 @@ export default function BPWSheet() {
       }
     } catch (err) {
       console.error("Failed to save next day sheet:", err);
-      setSyncStatus("syncing");
-      toast.warning(
-        "Could not reach server. Your entry is kept and will sync automatically.",
-      );
+      setSyncStatus("error");
+      toast.error("Save failed. Please check your connection and try again.");
     }
 
     setSyncStatus("live");
@@ -620,14 +606,10 @@ export default function BPWSheet() {
       setSyncStatus("live");
     } catch (err) {
       console.error("Failed to save reset sheet:", err);
-      setSyncStatus("syncing");
-      toast.warning(
-        "Could not reach server. Your entry is kept and will sync automatically.",
-      );
-      setSyncStatus("syncing");
-      toast.warning(
-        "Could not reach server. Your entry is kept and will sync automatically.",
-      );
+      setSyncStatus("error");
+      toast.error("Save failed. Please check your connection and try again.");
+      setSyncStatus("error");
+      toast.error("Save failed. Please check your connection and try again.");
     }
     setSheet(resetSheet);
     setShowResetDialog(false);
@@ -696,10 +678,8 @@ export default function BPWSheet() {
       setSyncStatus("live");
     } catch (err) {
       console.error("Failed to save unlocked sheet:", err);
-      setSyncStatus("syncing");
-      toast.warning(
-        "Could not reach server. Your entry is kept and will sync automatically.",
-      );
+      setSyncStatus("error");
+      toast.error("Save failed. Please check your connection and try again.");
     }
     setSheet(unlocked);
     await refreshDatesFromBackend();
@@ -743,10 +723,8 @@ export default function BPWSheet() {
       setSyncStatus("live");
     } catch (err) {
       console.error("Failed to save sheet:", err);
-      setSyncStatus("syncing");
-      toast.warning(
-        "Could not reach server. Your entry is kept and will sync automatically.",
-      );
+      setSyncStatus("error");
+      toast.error("Save failed. Please check your connection and try again.");
     }
     setSheet(updated);
     setShowDefaultQtyDialog(false);
@@ -898,10 +876,8 @@ export default function BPWSheet() {
       setSyncStatus("live");
     } catch (err) {
       console.error("Failed to save delivery entries:", err);
-      setSyncStatus("syncing");
-      toast.warning(
-        "Could not reach server. Your entry is kept and will sync automatically.",
-      );
+      setSyncStatus("error");
+      toast.error("Save failed. Please check your connection and try again.");
     }
     setSheet(updated);
     setShowDeliveryWindow(false);
@@ -949,10 +925,8 @@ export default function BPWSheet() {
       setSyncStatus("live");
     } catch (err) {
       console.error("Failed to save transfer entries:", err);
-      setSyncStatus("syncing");
-      toast.warning(
-        "Could not reach server. Your entry is kept and will sync automatically.",
-      );
+      setSyncStatus("error");
+      toast.error("Save failed. Please check your connection and try again.");
     }
     setSheet(updated);
     setShowTransferWindow(false);
@@ -974,10 +948,8 @@ export default function BPWSheet() {
       setSyncStatus("live");
     } catch (err) {
       console.error("Failed to save physical entries:", err);
-      setSyncStatus("syncing");
-      toast.warning(
-        "Could not reach server. Your entry is kept and will sync automatically.",
-      );
+      setSyncStatus("error");
+      toast.error("Save failed. Please check your connection and try again.");
     }
     setSheet(updated);
     setShowPhysicalWindow(false);
@@ -998,10 +970,8 @@ export default function BPWSheet() {
       setSyncStatus("live");
     } catch (err) {
       console.error("Failed to save POS count entries:", err);
-      setSyncStatus("syncing");
-      toast.warning(
-        "Could not reach server. Your entry is kept and will sync automatically.",
-      );
+      setSyncStatus("error");
+      toast.error("Save failed. Please check your connection and try again.");
     }
     setSheet(updated);
     setShowPosCountWindow(false);
@@ -1111,20 +1081,22 @@ export default function BPWSheet() {
               </h1>
               <div className="flex items-center gap-1 mt-0.5">
                 <p className="text-white/60 text-[9px]">
-                  BPW Daily Sheet · v38
+                  BPW Daily Sheet · v36
                 </p>
                 <span
                   className={cn(
                     "w-1.5 h-1.5 rounded-full shrink-0",
                     syncStatus === "syncing" && "bg-yellow-400 animate-pulse",
                     syncStatus === "live" && "bg-green-400",
-                    syncStatus === "error" && "bg-yellow-400 animate-pulse",
+                    syncStatus === "error" && "bg-red-400",
+                    syncStatus === "load-error" && "bg-orange-400",
                   )}
                 />
                 <span className="text-[8px] text-white/50 hidden sm:inline">
-                  {syncStatus === "syncing" && "Connecting..."}
+                  {syncStatus === "syncing" && "Syncing..."}
                   {syncStatus === "live" && "Live"}
-                  {syncStatus === "error" && "Retrying..."}
+                  {syncStatus === "error" && "Save Error"}
+                  {syncStatus === "load-error" && "Offline"}
                 </span>
               </div>
             </div>
