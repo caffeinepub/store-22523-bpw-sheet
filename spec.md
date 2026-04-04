@@ -1,44 +1,22 @@
 # Store 22523 BPW Sheet
 
 ## Current State
-The app uses an offline-first architecture:
-- `offlineStorage.ts` — IndexedDB layer with `bpw_offline_v1` database storing sheets, product names, and a `pendingWrites` sync queue
-- `backendStorage.ts` — Orchestration layer: all reads return IndexedDB cache immediately, canister is updated asynchronously in background; all writes go to IndexedDB first, then attempt canister, and on failure enqueue to the pending-writes queue
-- `BPWSheet.tsx` — Imports `cacheSheet` and `hasPendingWrites` from `offlineStorage`; has a `flushPendingWrites` effect that runs on mount and on `online` events; all save operations check pending-write queue and show a `"queued"` sync status
+Data is saved directly to the ICP canister (update calls). Reading is done via ICP `query` calls which are fast but non-certified — they hit a single replica node that may lag behind the latest committed state. The polling interval is 15 seconds. There is no refresh triggered when the user returns to the app on their device.
 
 ## Requested Changes (Diff)
 
 ### Add
-- Immediate error feedback on the specific save operation that fails (cell shows saving indicator; on failure shows inline error)
-- Simplified sync status: only `"syncing"` (in-flight), `"live"` (success), `"offline"` (error)
+- `visibilitychange` event listener: when the user returns to the tab/app (document becomes visible), immediately re-fetch the sheet and product names from the canister so the phone always shows fresh data the moment staff open the app
+- `focus` event listener on window for the same reason
 
 ### Modify
-- `backendStorage.ts` — Completely rewrite all async functions to call `actor.*()` directly, with no IndexedDB reads or writes. Keep type-conversion helpers (`toBackendSheet`, `convertBackendSheet`, etc.) unchanged. All functions are now direct await calls that throw on failure.
-- `BPWSheet.tsx` — Remove all `offlineStorage` imports, remove `flushPendingWrites` useEffect, remove all `hasPendingWrites()` calls, remove all `else { cacheSheet() }` fallbacks, remove `"queued"` sync state, simplify sync status to three states.
+- Reduce poll interval from 15 seconds to 5 seconds so cross-device updates appear faster
+- After any successful save, trigger an immediate re-fetch (to confirm data round-trips correctly and update the local state with the canonical canister version)
 
 ### Remove
-- `offlineStorage.ts` — Entire IndexedDB layer deleted
-- `pendingWrites` sync queue logic throughout `BPWSheet.tsx` and `backendStorage.ts`
-- `flushPendingWrites` function and its `useEffect` in `BPWSheet.tsx`
+- Nothing removed
 
 ## Implementation Plan
-1. Delete `src/frontend/src/lib/offlineStorage.ts`
-2. Rewrite `src/frontend/src/lib/backendStorage.ts`:
-   - Keep all type-conversion helpers
-   - `saveSheetToBackend(actor, sheet)` → `await actor.saveSheet(toBackendSheet(sheet))`
-   - `loadSheetFromBackend(actor, date)` → `await actor.loadSheet(date)` + convert
-   - `loadAllSheetsFromBackend(actor)` → `await actor.loadAllSheets()` + convert
-   - `saveProductNamesToBackend(actor, names)` → `await actor.saveProductNames(names)`
-   - `loadProductNamesFromBackend(actor)` → `await actor.loadProductNames()` + convert
-   - `getOrCreateSheetFromBackend(actor, date, names)` → canister-only: load sheet, if not found create from previous locked sheet, save to canister
-   - `getMostRecentLockedSheetFromBackend(actor, date)` → load all from canister, filter
-   - Remove `flushPendingWrites`, `syncFromCanister` (no longer needed)
-3. Edit `BPWSheet.tsx`:
-   - Remove `import { cacheSheet, hasPendingWrites } from "../lib/offlineStorage"`
-   - Remove `flushPendingWrites` from backendStorage imports
-   - Remove the `flushPendingWrites` useEffect block
-   - Remove all `hasPendingWrites()` calls
-   - Remove all `else { await cacheSheet(updated) }` fallbacks on all save handlers
-   - Remove `"queued"` from `SyncStatus` type
-   - Update sync status indicator: yellow = syncing, green = live, red = offline/error
-   - On save failure: set `syncStatus = "offline"` and show a brief toast/alert so staff know to retry
+1. In `BPWSheet.tsx`, reduce `POLL_INTERVAL` from `15_000` to `5_000`
+2. Add a `useEffect` that listens to `document.addEventListener('visibilitychange', ...)` and `window.addEventListener('focus', ...)` — when triggered and `document.visibilityState === 'visible'`, call `loadSheetFromBackend` and update state immediately
+3. After each successful `guardedSave`, re-fetch the sheet and update state to confirm the canister round-trip

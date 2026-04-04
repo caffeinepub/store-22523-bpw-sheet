@@ -194,7 +194,7 @@ export default function BPWSheet() {
     })),
     locked: false,
   }));
-  const [syncStatus, setSyncStatus] = useState<"syncing" | "live" | "offline">(
+  const [syncStatus, setSyncStatus] = useState<"syncing" | "live" | "error">(
     "syncing",
   );
   const [allDates, setAllDates] = useState<string[]>([]);
@@ -310,7 +310,7 @@ export default function BPWSheet() {
         console.error("Failed to load sheet:", err);
         // Silently fall back — sheet already shows from default state
         if (!cancelled) {
-          setSyncStatus("offline");
+          setSyncStatus("error");
         }
       }
     })();
@@ -344,7 +344,7 @@ export default function BPWSheet() {
   // Skips the update if a save is currently in flight to avoid overwriting in-progress entries.
   useEffect(() => {
     if (!actor) return;
-    const POLL_INTERVAL = 15_000; // 15 seconds
+    const POLL_INTERVAL = 5_000; // 5 seconds
     const timer = setInterval(async () => {
       if (isSavingRef.current) return; // skip if user is mid-save
       try {
@@ -364,6 +364,30 @@ export default function BPWSheet() {
       }
     }, POLL_INTERVAL);
     return () => clearInterval(timer);
+  }, [actor, selectedDate]);
+
+  // Refresh data immediately when user returns to the app (tab focus or phone unlock)
+  useEffect(() => {
+    if (!actor) return;
+    const handleVisibility = async () => {
+      if (document.visibilityState !== "visible") return;
+      if (isSavingRef.current) return;
+      try {
+        const remote = await loadSheetFromBackend(actor, selectedDate);
+        if (remote) {
+          setSheet(remote);
+          setSyncStatus("live");
+        }
+      } catch {
+        // silent
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleVisibility);
+    };
   }, [actor, selectedDate]);
 
   // Helper to refresh allDates and lockedDates from backend
@@ -397,7 +421,7 @@ export default function BPWSheet() {
         setSyncStatus("live");
       } catch (err) {
         console.error("Failed to save product names:", err);
-        setSyncStatus("offline");
+        setSyncStatus("error");
         toast.error("Save failed. Please check your connection and try again.");
       }
       setSheet((prev) => {
@@ -419,15 +443,15 @@ export default function BPWSheet() {
           }
         } catch (err) {
           console.error("Failed to save sheet:", err);
-          setSyncStatus("offline");
+          setSyncStatus("error");
           toast.error(
             "Save failed. Please check your connection and try again.",
           );
-          setSyncStatus("offline");
+          setSyncStatus("error");
           toast.error(
             "Save failed. Please check your connection and try again.",
           );
-          setSyncStatus("offline");
+          setSyncStatus("error");
           toast.error(
             "Save failed. Please check your connection and try again.",
           );
@@ -462,7 +486,7 @@ export default function BPWSheet() {
         setSyncStatus("live");
       } catch (err) {
         console.error("Failed to save sheet:", err);
-        setSyncStatus("offline");
+        setSyncStatus("error");
         toast.error("Save failed. Please check your connection and try again.");
       }
     },
@@ -488,7 +512,7 @@ export default function BPWSheet() {
       }
     } catch (err) {
       console.error("Failed to save locked sheet:", err);
-      setSyncStatus("offline");
+      setSyncStatus("error");
       toast.error("Save failed. Please check your connection and try again.");
     }
     setSheet(locked);
@@ -526,7 +550,7 @@ export default function BPWSheet() {
       }
     } catch (err) {
       console.error("Failed to save next day sheet:", err);
-      setSyncStatus("offline");
+      setSyncStatus("error");
       toast.error("Save failed. Please check your connection and try again.");
     }
 
@@ -564,9 +588,9 @@ export default function BPWSheet() {
       setSyncStatus("live");
     } catch (err) {
       console.error("Failed to save reset sheet:", err);
-      setSyncStatus("offline");
+      setSyncStatus("error");
       toast.error("Save failed. Please check your connection and try again.");
-      setSyncStatus("offline");
+      setSyncStatus("error");
       toast.error("Save failed. Please check your connection and try again.");
     }
     setSheet(resetSheet);
@@ -636,7 +660,7 @@ export default function BPWSheet() {
       setSyncStatus("live");
     } catch (err) {
       console.error("Failed to save unlocked sheet:", err);
-      setSyncStatus("offline");
+      setSyncStatus("error");
       toast.error("Save failed. Please check your connection and try again.");
     }
     setSheet(unlocked);
@@ -681,7 +705,7 @@ export default function BPWSheet() {
       setSyncStatus("live");
     } catch (err) {
       console.error("Failed to save sheet:", err);
-      setSyncStatus("offline");
+      setSyncStatus("error");
       toast.error("Save failed. Please check your connection and try again.");
     }
     setSheet(updated);
@@ -823,7 +847,7 @@ export default function BPWSheet() {
       setSyncStatus("live");
     } catch (err) {
       console.error("Failed to save delivery entries:", err);
-      setSyncStatus("offline");
+      setSyncStatus("error");
       toast.error("Save failed. Please check your connection and try again.");
     }
     setSheet(updated);
@@ -872,7 +896,7 @@ export default function BPWSheet() {
       setSyncStatus("live");
     } catch (err) {
       console.error("Failed to save transfer entries:", err);
-      setSyncStatus("offline");
+      setSyncStatus("error");
       toast.error("Save failed. Please check your connection and try again.");
     }
     setSheet(updated);
@@ -895,7 +919,7 @@ export default function BPWSheet() {
       setSyncStatus("live");
     } catch (err) {
       console.error("Failed to save physical entries:", err);
-      setSyncStatus("offline");
+      setSyncStatus("error");
       toast.error("Save failed. Please check your connection and try again.");
     }
     setSheet(updated);
@@ -917,7 +941,7 @@ export default function BPWSheet() {
       setSyncStatus("live");
     } catch (err) {
       console.error("Failed to save POS count entries:", err);
-      setSyncStatus("offline");
+      setSyncStatus("error");
       toast.error("Save failed. Please check your connection and try again.");
     }
     setSheet(updated);
@@ -1032,13 +1056,13 @@ export default function BPWSheet() {
                   "w-2 h-2 rounded-full shrink-0",
                   syncStatus === "syncing" && "bg-yellow-400 animate-pulse",
                   syncStatus === "live" && "bg-green-400",
-                  syncStatus === "offline" && "bg-red-400",
+                  syncStatus === "error" && "bg-red-400",
                 )}
               />
               <span className="text-[9px] text-white/50">
                 {syncStatus === "syncing" && "Syncing..."}
                 {syncStatus === "live" && "Live"}
-                {syncStatus === "offline" && "Offline"}
+                {syncStatus === "error" && "Save Error"}
               </span>
             </div>
           </div>
