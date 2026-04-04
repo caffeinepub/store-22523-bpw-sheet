@@ -3,18 +3,24 @@
  * All data is stored on-chain so it's accessible from any device.
  */
 
-import type { backendInterface } from "../backend";
+import type {
+  ProductNameEntry,
+  SheetEntry,
+  backendInterface,
+} from "../backend";
 
-// Extended interface for backup operations (new backend methods)
-export interface FullBackup {
-  sheets: Array<import("../backend").SheetEntry>;
-  productNames: Array<import("../backend").ProductNameEntry>;
+// Full backup payload type (mirrors FullBackup in backend.d.ts)
+interface FullBackup {
+  sheets: SheetEntry[];
+  productNames: ProductNameEntry[];
 }
 
-interface backendWithBackup extends backendInterface {
+// Extended interface that includes backup methods (present in backend but not in generated bindings)
+interface BackendWithBackup extends backendInterface {
   exportAllData(): Promise<FullBackup>;
   importAllData(backup: FullBackup): Promise<void>;
 }
+
 import type {
   DailySheet as BackendDailySheet,
   NegativeEntry as BackendNegativeEntry,
@@ -250,7 +256,7 @@ export async function getOrCreateSheetFromBackend(
 
 /** Download all data as a JSON backup file */
 export async function downloadBackup(actor: backendInterface): Promise<void> {
-  const backupActor = actor as backendWithBackup;
+  const backupActor = actor as BackendWithBackup;
   const backup = await backupActor.exportAllData();
   const json = JSON.stringify(
     backup,
@@ -263,7 +269,9 @@ export async function downloadBackup(actor: backendInterface): Promise<void> {
   const today = new Date().toISOString().slice(0, 10);
   a.href = url;
   a.download = `bpw-backup-${today}.json`;
+  document.body.appendChild(a);
   a.click();
+  document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
 
@@ -272,21 +280,40 @@ export async function restoreBackup(
   actor: backendInterface,
   file: File,
 ): Promise<void> {
-  const backupActor = actor as backendWithBackup;
   const text = await file.text();
-  const backup = JSON.parse(text);
-  // Convert any number-typed bigints back
-  const convert = (obj: unknown): unknown => {
-    if (Array.isArray(obj)) return obj.map(convert);
-    if (obj && typeof obj === "object") {
-      return Object.fromEntries(
-        Object.entries(obj as Record<string, unknown>).map(([k, v]) => [
-          k,
-          convert(v),
-        ]),
-      );
-    }
-    return obj;
+  const raw = JSON.parse(text);
+
+  // Deep-convert: productIndex and cellIndex inside negativeEntries must be BigInt
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const convertNegativeEntry = (e: any) => ({
+    ...e,
+    productIndex: BigInt(e.productIndex ?? 0),
+    cellIndex: BigInt(e.cellIndex ?? 0),
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const convertSheet = (sheet: any) => ({
+    ...sheet,
+    negativeEntries: (sheet.negativeEntries ?? []).map(convertNegativeEntry),
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const convertSheetEntry = (entry: any) => ({
+    ...entry,
+    value: { ...entry.value, sheet: convertSheet(entry.value.sheet) },
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const convertProductNameEntry = (entry: any) => ({
+    ...entry,
+    key: { ...entry.key, index: BigInt(entry.key.index ?? 0) },
+  });
+
+  const backup = {
+    sheets: (raw.sheets ?? []).map(convertSheetEntry),
+    productNames: (raw.productNames ?? []).map(convertProductNameEntry),
   };
-  await backupActor.importAllData(convert(backup) as FullBackup);
+
+  const backupActor = actor as BackendWithBackup;
+  await backupActor.importAllData(backup);
 }

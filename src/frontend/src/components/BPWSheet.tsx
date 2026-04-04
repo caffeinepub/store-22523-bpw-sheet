@@ -195,6 +195,8 @@ export default function BPWSheet() {
   const [slicerOpen, setSlicerOpen] = useState(false);
   // Editable product names – loaded from backend
   const [productNames, setProductNames] = useState<string[]>(DEFAULT_PRODUCTS);
+  // Whether product names have been loaded from the backend (prevents loading sheet with stale defaults)
+  const [productNamesReady, setProductNamesReady] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   // Run Report state
   const [showRunReport, setShowRunReport] = useState(false);
@@ -255,17 +257,27 @@ export default function BPWSheet() {
     return () => window.removeEventListener("beforeinstallprompt", handler);
   }, []);
 
-  // Load product names once when actor is ready
+  // One-time initialization: load product names + all dates when actor is ready
   useEffect(() => {
     if (!actor || actorFetching) return;
     let cancelled = false;
     (async () => {
       try {
-        const names = await loadProductNamesFromBackend(actor);
-        if (!cancelled) setProductNames(names);
+        const [names, allSheets] = await Promise.all([
+          loadProductNamesFromBackend(actor),
+          loadAllSheetsFromBackend(actor),
+        ]);
+        if (!cancelled) {
+          setProductNames(names);
+          setProductNamesReady(true);
+          setAllDates(allSheets.map((sh) => sh.date));
+          setLockedDates(
+            allSheets.filter((sh) => sh.locked).map((sh) => sh.date),
+          );
+        }
       } catch (err) {
-        console.error("Failed to load product names:", err);
-        toast.error("Failed to load product names from server");
+        console.error("Failed to initialize data:", err);
+        toast.error("Failed to load data from server");
       }
     })();
     return () => {
@@ -273,22 +285,20 @@ export default function BPWSheet() {
     };
   }, [actor, actorFetching]);
 
-  // Load sheet when date or actor changes
+  // Load sheet when date changes (uses already-loaded productNames)
   useEffect(() => {
-    if (!actor || actorFetching) return;
+    if (!actor || actorFetching || !productNamesReady) return;
     let cancelled = false;
     setIsLoading(true);
     (async () => {
       try {
-        const names = await loadProductNamesFromBackend(actor);
-        const s = await getOrCreateSheetFromBackend(actor, selectedDate, names);
-        const allSheets = await loadAllSheetsFromBackend(actor);
+        const s = await getOrCreateSheetFromBackend(
+          actor,
+          selectedDate,
+          productNames,
+        );
         if (!cancelled) {
           setSheet(s);
-          setAllDates(allSheets.map((sh) => sh.date));
-          setLockedDates(
-            allSheets.filter((sh) => sh.locked).map((sh) => sh.date),
-          );
           setIsLoading(false);
         }
       } catch (err) {
@@ -302,7 +312,7 @@ export default function BPWSheet() {
     return () => {
       cancelled = true;
     };
-  }, [selectedDate, actor, actorFetching]);
+  }, [selectedDate, actor, actorFetching, productNames, productNamesReady]);
 
   // Helper to refresh allDates and lockedDates from backend
   const refreshDatesFromBackend = useCallback(async () => {

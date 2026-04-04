@@ -1,29 +1,24 @@
-# Store 22523 BPW Sheet
+# Store 22523 BPW Sheet — Version 21 Fix
 
 ## Current State
-The app stores all data (daily sheets, product names) in an ICP backend canister. The frontend has a Sidebar with calendar and historical entries. There is no mechanism to export or import the full database.
+- Version 20 deployed with Delivery/Transfer columns locked (entries via windows only)
+- Database backup (download) and restore (upload) in sidebar panel
+- All data stored on ICP blockchain canister
+- App loads sheet data from canister on every date change
 
 ## Requested Changes (Diff)
 
 ### Add
-- Backend: `exportAllData()` query that returns all sheets + product names as a single serializable object.
-- Backend: `importAllData(data)` update that overwrites all sheets and product names from an import payload.
-- Frontend: "Database Backup" section at the bottom of the Sidebar with two buttons:
-  - **Download Backup** — exports all data as a JSON file (timestamped filename like `bpw-backup-2026-04-04.json`).
-  - **Restore Backup** — file picker accepting `.json` only; after selecting, shows a confirmation dialog (with admin password 9924827787) before overwriting backend data.
-- Mobile: ensure sidebar is accessible on mobile (collapsible drawer/panel) so the backup/restore buttons are reachable on small screens.
+- Nothing new
 
 ### Modify
-- Sidebar: add the new Database Backup card below the Historical Entries section.
-- BPWSheet: if sidebar is already collapsible on mobile, wire backup/restore there too.
+- **Fix backup download**: The `downloadBackup` function in `backendStorage.ts` casts actor to `backendWithBackup` unnecessarily — `exportAllData` is already declared in `backend.d.ts` on `backendInterface`. The BigInt replacer in JSON.stringify works but the restore path needs to properly convert numeric values back to BigInt for `productIndex` and `cellIndex` fields in `NegativeEntry`.
+- **Fix restore**: When restoring a JSON backup, `productIndex` and `cellIndex` in `NegativeEntry` are stored as numbers in JSON but the canister expects `bigint`. The `convert` function in `restoreBackup` does not convert them to BigInt. This causes the restore call to fail silently or throw.
+- **Fix slow loading / buffering**: The sheet load `useEffect` in `BPWSheet.tsx` calls `loadProductNamesFromBackend` AND `loadAllSheetsFromBackend` on every date change. This is 3 separate canister round-trips per date change. Optimize by: (1) only loading product names once (already done in the product names effect), passing them to getOrCreateSheet instead of re-fetching; (2) caching the list of all sheet dates in a ref after first fetch so `loadAllSheetsFromBackend` is not called every time a date is selected — only dates list needs refreshing, not all sheet data.
 
 ### Remove
-- Nothing removed.
+- Redundant `backendWithBackup` interface in `backendStorage.ts` (use `backendInterface` directly which already has those methods)
 
 ## Implementation Plan
-1. Add `exportAllData` and `importAllData` to `src/backend/main.mo`.
-2. Regenerate / manually update `src/frontend/src/backend.d.ts` to expose the new functions.
-3. Add `downloadBackup` and `restoreBackup` helper functions in `src/frontend/src/lib/backendStorage.ts`.
-4. Update `Sidebar.tsx` to include Database Backup card with Download and Restore buttons.
-5. Add admin-password confirmation dialog before restore.
-6. Ensure mobile layout has access to sidebar via a menu/drawer button in the sticky header.
+1. In `backendStorage.ts`: remove `backendWithBackup` interface, use `backendInterface` directly in `downloadBackup` and `restoreBackup`. Fix the restore `convert` function to correctly convert `productIndex` and `cellIndex` to `BigInt`.
+2. In `BPWSheet.tsx`: fix the sheet load `useEffect` to NOT re-call `loadProductNamesFromBackend` — use the already-loaded `productNames` state. Also add a `refreshDatesFromBackend` helper that only fetches dates+locked status, not full sheet data. Reduce canister calls on date change from 3 down to 1-2.
