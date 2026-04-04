@@ -261,3 +261,13 @@ input[type="number"] {
 .print-only {
   display: none;
 }
+
+@media print {
+  img[alt="22523 BPW Logo"],
+  img[alt="22523 BPW"],
+  img[alt=""] {
+    display: block !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

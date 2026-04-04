@@ -1,217 +1,152 @@
 import Map "mo:core/Map";
 import Text "mo:core/Text";
 import Nat "mo:core/Nat";
-import Order "mo:core/Order";
-import Array "mo:core/Array";
-import Time "mo:core/Time";
-import Float "mo:core/Float";
-import Iter "mo:core/Iter";
-import Runtime "mo:core/Runtime";
-import Int "mo:core/Int";
 import List "mo:core/List";
+import Float "mo:core/Float";
+import Array "mo:core/Array";
+import Order "mo:core/Order";
+import Migration "migration";
 
+(with migration = Migration.run)
 actor {
-  // Data types
-  type Product = {
-    id : Nat;
+  public type ProductRow = {
+    productName : Text;
+    opening : Float;
+    delivery : Float;
+    deliveryCells : [Float];
+    transfer : Float;
+    transferCells : [Float];
+    openCounter : Float;
+    physical : Float;
+    additional : Float;
+    posCount : Float;
+  };
+
+  public type NegativeEntry = {
+    entryType : Text; // "delivery" or "transfer"
+    productIndex : Nat;
+    cellIndex : Nat;
+    quantity : Float;
+    reason : Text;
+  };
+
+  public type ReportRow = {
+    reportLabel : Text;
+    variance : Float;
+    status : Text;
+  };
+
+  public type DailySheet = {
+    date : Text; // YYYY-MM-DD
+    rows : [ProductRow];
+    locked : Bool;
+    finalizedReport : ?[ReportRow];
+    negativeReasons : [(Text, Text)]; // (reason, description)
+    negativeEntries : [NegativeEntry];
+  };
+
+  public type SheetKey = {
+    date : Text;
+  };
+
+  public type SheetValue = {
+    sheet : DailySheet;
+  };
+
+  type ProductNameKey = {
+    index : Nat;
+  };
+
+  type ProductNameValue = {
     name : Text;
-    unit : Text;
   };
 
-  type StockEntry = {
-    productId : Nat;
-    openingStock : Float;
-    receivedQty : Float;
-    soldQty : Float;
-    actualClosing : Float;
+  public type SheetEntry = {
+    key : SheetKey;
+    value : SheetValue;
   };
 
-  type Session = {
-    sessionType : Text; // "AM" or "PM"
-    entries : [StockEntry];
-    savedAt : Int;
+  public type ProductNameEntry = {
+    key : ProductNameKey;
+    value : ProductNameValue;
   };
 
-  type DailySheet = {
-    date : Text; // YYYYMMDD
-    sessions : [Session];
-    isClosed : Bool;
-    closedAt : ?Int;
+  // Persistent storage: use Maps
+  let sheetMap = Map.empty<Text, DailySheet>();
+  let productNamesMap = Map.empty<Nat, ProductNameValue>();
+
+  func compareEntries(a : SheetEntry, b : SheetEntry) : Order.Order {
+    Text.compare(a.key.date, b.key.date);
   };
 
-  // Persistent state
-  let productList = List.empty<Product>();
-  let dailySheets = Map.empty<Text, DailySheet>();
+  // Save or update a daily sheet
+  public shared ({ caller }) func saveSheet(sheet : DailySheet) : async () {
+    sheetMap.add(sheet.date, sheet);
+  };
 
-  // Utility functions
-  module Helpers {
-    public func compareProductsById(a : Product, b : Product) : Order.Order {
-      Nat.compare(a.id, b.id);
+  // Load a single sheet by date
+  public query ({ caller }) func loadSheet(date : Text) : async ?DailySheet {
+    sheetMap.get(date);
+  };
+
+  // Load all sheets
+  public query ({ caller }) func loadAllSheets() : async [SheetEntry] {
+    let entries = List.empty<SheetEntry>();
+    for ((k, v) in sheetMap.entries()) {
+      entries.add({ key = { date = k }; value = { sheet = v } });
     };
 
-    public func compareDailySheetByDateAsc(a : DailySheet, b : DailySheet) : Order.Order {
-      Text.compare(a.date, b.date);
-    };
+    let sortedEntries = entries.toArray().sort(compareEntries);
+    sortedEntries;
+  };
 
-    public func compareDailySheetByDateDesc(a : DailySheet, b : DailySheet) : Order.Order {
-      Text.compare(b.date, a.date);
-    };
-
-    public func compareStockEntryByProductId(a : StockEntry, b : StockEntry) : Order.Order {
-      Nat.compare(a.productId, b.productId);
+  // Save product names
+  public shared ({ caller }) func saveProductNames(names : [Text]) : async () {
+    for (i in Nat.range(0, names.size())) {
+      productNamesMap.add(i, { name = names[i] });
     };
   };
 
-  // Initialize products if not present
-  public shared ({ caller }) func initializeProducts() : async () {
-    if (productList.isEmpty()) {
-      let defaultProducts : [Product] = [
-        { id = 1; name = "Bun"; unit = "piece" },
-        { id = 2; name = "Bread Loaf"; unit = "loaf" },
-        { id = 3; name = "Croissant"; unit = "piece" },
-        { id = 4; name = "Cake"; unit = "kg" },
-        { id = 5; name = "Donut"; unit = "piece" },
-        { id = 6; name = "Muffin"; unit = "piece" },
-        { id = 7; name = "Roll"; unit = "piece" },
-        { id = 8; name = "Bread Slice"; unit = "pack" },
-        { id = 9; name = "Cupcake"; unit = "piece" },
-        { id = 10; name = "Baguette"; unit = "stick" },
-      ];
-      for (p in defaultProducts.values()) {
-        productList.add(p);
+  // Load product names
+  public query ({ caller }) func loadProductNames() : async [ProductNameEntry] {
+    let entries = List.empty<ProductNameEntry>();
+    for ((k, v) in productNamesMap.entries()) {
+      entries.add({ key = { index = k }; value = v });
+    };
+
+    let sortedEntries = entries.toArray();
+    sortedEntries;
+  };
+
+  // Helper to get product name by index
+  public query ({ caller }) func getProductName(index : Nat) : async ?Text {
+    switch (productNamesMap.get(index)) {
+      case (?name) { ?name.name };
+      case (null) { null };
+    };
+  };
+
+  // Helper to get all negative entries for a date
+  public query ({ caller }) func getNegativeEntries(date : Text) : async ?[NegativeEntry] {
+    switch (sheetMap.get(date)) {
+      case (?sheet) { ?sheet.negativeEntries };
+      case (null) { null };
+    };
+  };
+
+  // Helper to lock a sheet
+  public shared ({ caller }) func lockSheet(date : Text) : async Bool {
+    switch (sheetMap.get(date)) {
+      case (?sheet) {
+        let updatedSheet = {
+          sheet with
+          locked = true;
+        };
+        sheetMap.add(date, updatedSheet);
+        true;
       };
-    };
-  };
-
-  // Save or update a session
-  public shared ({ caller }) func saveSession(date : Text, session : Session) : async () {
-    let merged : DailySheet = switch (dailySheets.get(date)) {
-      case (null) {
-        {
-          date;
-          sessions = [session];
-          isClosed = false;
-          closedAt = null;
-        };
-      };
-      case (?existing) {
-        if (existing.isClosed) {
-          Runtime.trap("Cannot edit a closed sheet");
-        };
-        let filteredSessions = existing.sessions.filter(
-          func(s) { not Text.equal(s.sessionType, session.sessionType) }
-        );
-        {
-          existing with
-          sessions = filteredSessions.concat([session]);
-        };
-      };
-    };
-
-    dailySheets.add(date, merged);
-  };
-
-  // Close/daily sheet
-  public shared ({ caller }) func closeDay(date : Text) : async () {
-    let now = Time.now();
-    let closedSheet = switch (dailySheets.get(date)) {
-      case (null) { Runtime.trap("Sheet does not exist") };
-      case (?d) {
-        if (d.isClosed) {
-          Runtime.trap("Sheet already closed");
-        };
-        {
-          d with
-          isClosed = true;
-          closedAt = ?now;
-        };
-      };
-    };
-    dailySheets.add(date, closedSheet);
-  };
-
-  // Get daily sheet by date
-  public query ({ caller }) func getDailySheet(date : Text) : async ?DailySheet {
-    dailySheets.get(date);
-  };
-
-  // Get all closed dates
-  public query ({ caller }) func getClosedDates() : async [Text] {
-    dailySheets.values().toArray().filter(
-      func(s) { s.isClosed }
-    ).map(func(s) { s.date });
-  };
-
-  // Get opening stock for new day
-  public query ({ caller }) func getOpeningStockForNewDay(date : Text) : async [StockEntry] {
-    let sortedClaySheetArray = dailySheets.values().toArray().map(
-      func(ds) { ds }
-    ).sort(Helpers.compareDailySheetByDateDesc);
-
-    for (ds in sortedClaySheetArray.values()) {
-      if (ds.isClosed and not Text.equal(ds.date, date)) {
-        let lastSession = ds.sessions.reverse()[0];
-        return lastSession.entries.sort(Helpers.compareStockEntryByProductId);
-      };
-    };
-
-    // No prior closed day, default to zero opening stock for all products
-    productList.toArray().map(
-      func(p) {
-        {
-          productId = p.id;
-          openingStock = 0.0;
-          receivedQty = 0.0;
-          soldQty = 0.0;
-          actualClosing = 0.0;
-        };
-      }
-    );
-  };
-
-  // Get product list
-  public query ({ caller }) func getProducts() : async [Product] {
-    productList.toArray().sort(Helpers.compareProductsById);
-  };
-
-  // Get all days by isClosed status
-  public query ({ caller }) func getDaysByStatus(isClosed : Bool) : async [Text] {
-    dailySheets.values().toArray().filter(
-      func(s) { s.isClosed == isClosed }
-    ).map(func(s) { s.date });
-  };
-
-  // get all stock for a given day
-  public query ({ caller }) func getAllStockForDay(date : Text) : async [StockEntry] {
-    switch (dailySheets.get(date)) {
-      case (null) { [] };
-      case (?d) {
-        let stock = List.empty<StockEntry>();
-        for (session in d.sessions.values()) {
-          for (entry in session.entries.values()) {
-            stock.add(entry);
-          };
-        };
-        stock.toArray();
-      };
-    };
-  };
-
-  // Get diff for day
-  public query ({ caller }) func getDiffForDay(date : Text) : async [StockEntry] {
-    switch (dailySheets.get(date)) {
-      case (null) { [] };
-      case (?d) {
-        let diff = List.empty<StockEntry>();
-        for (session in d.sessions.values()) {
-          for (entry in session.entries.values()) {
-            let calculatedClosing = entry.openingStock + entry.receivedQty - entry.soldQty;
-            let difference = calculatedClosing - entry.actualClosing;
-            diff.add({ entry with actualClosing = difference });
-          };
-        };
-        diff.toArray();
-      };
+      case (null) { false };
     };
   };
 };
+

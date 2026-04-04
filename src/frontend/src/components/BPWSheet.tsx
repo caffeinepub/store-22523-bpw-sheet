@@ -20,27 +20,30 @@ import {
   Printer,
   RotateCcw,
   ShieldAlert,
-  StoreIcon,
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useActor } from "../hooks/useActor";
+import {
+  getMostRecentLockedSheetFromBackend,
+  getOrCreateSheetFromBackend,
+  loadAllSheetsFromBackend,
+  loadProductNamesFromBackend,
+  saveProductNamesToBackend,
+  saveSheetToBackend,
+} from "../lib/backendStorage";
 import { computeRow } from "../lib/calculations";
 import {
+  DEFAULT_PRODUCTS,
   type DailySheet,
   type FinalizedReportRow,
+  type NegativeEntry,
   type ProductRow,
   calcStoreClosing,
   calcTotalBA,
   calcTotalCounter,
-  getAllSheetDates,
-  getLockedDates,
-  getMostRecentLockedSheet,
-  getOrCreateSheet,
-  loadProductNames,
-  saveProductNames,
-  saveSheet,
 } from "../lib/sheetStorage";
 import CalendarPanel from "./CalendarPanel";
 import SheetTable from "./SheetTable";
@@ -187,10 +190,9 @@ export default function BPWSheet() {
   const [adminEditPassword, setAdminEditPassword] = useState("");
   const [adminEditPasswordError, setAdminEditPasswordError] = useState(false);
   const [slicerOpen, setSlicerOpen] = useState(false);
-  // Editable product names – persisted in localStorage
-  const [productNames, setProductNames] = useState<string[]>(() =>
-    loadProductNames(),
-  );
+  // Editable product names – loaded from backend
+  const [productNames, setProductNames] = useState<string[]>(DEFAULT_PRODUCTS);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   // Run Report state
   const [showRunReport, setShowRunReport] = useState(false);
   const [runReportStage, setRunReportStage] = useState<"report" | "finalize">(
@@ -200,19 +202,110 @@ export default function BPWSheet() {
   const [showDefaultQtyDialog, setShowDefaultQtyDialog] = useState(false);
   // Delivery Window state
   const [showDeliveryWindow, setShowDeliveryWindow] = useState(false);
-  const [deliveryDraft, setDeliveryDraft] = useState<number[]>([]);
+  const [deliveryDraft, setDeliveryDraft] = useState<
+    [number, number, number][]
+  >([]);
   // Transfer Window state
   const [showTransferWindow, setShowTransferWindow] = useState(false);
-  const [transferDraft, setTransferDraft] = useState<number[]>([]);
+  const [transferDraft, setTransferDraft] = useState<
+    [number, number, number][]
+  >([]);
+  // Negative entry reason prompt state
+  const [pendingReason, setPendingReason] = useState<{
+    type: "delivery" | "transfer";
+    productIdx: number;
+    cellIdx: number;
+    qty: number;
+  } | null>(null);
+  const [reasonDraft, setReasonDraft] = useState("");
+  // Negative reasons for current window draft (key: "type_idx_cell")
+  const [draftReasons, setDraftReasons] = useState<Record<string, string>>({});
+  // PWA install banner state
+  const [showInstallBanner, setShowInstallBanner] = useState<boolean>(() => {
+    return localStorage.getItem("pwa-banner-dismissed") !== "1";
+  });
+  const [isIOS, setIsIOS] = useState<boolean>(false);
+  const deferredPromptRef = useRef<(Event & { prompt: () => void }) | null>(
+    null,
+  );
 
-  // Load sheet when date changes
+  // Backend actor for cross-device data
+  const { actor, isFetching: actorFetching } = useActor();
+
+  // PWA install prompt
   useEffect(() => {
-    const names = loadProductNames();
-    const s = getOrCreateSheet(selectedDate, names);
-    setSheet(s);
-    setAllDates(getAllSheetDates());
-    setLockedDates(getLockedDates());
-  }, [selectedDate]);
+    const iosCheck =
+      /iPhone|iPad|iPod/.test(navigator.userAgent) &&
+      !(window as Window & typeof globalThis & { MSStream?: unknown }).MSStream;
+    setIsIOS(iosCheck);
+    const handler = (e: Event) => {
+      e.preventDefault();
+      deferredPromptRef.current = e as Event & { prompt: () => void };
+    };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  // Load product names once when actor is ready
+  useEffect(() => {
+    if (!actor || actorFetching) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const names = await loadProductNamesFromBackend(actor);
+        if (!cancelled) setProductNames(names);
+      } catch (err) {
+        console.error("Failed to load product names:", err);
+        toast.error("Failed to load product names from server");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [actor, actorFetching]);
+
+  // Load sheet when date or actor changes
+  useEffect(() => {
+    if (!actor || actorFetching) return;
+    let cancelled = false;
+    setIsLoading(true);
+    (async () => {
+      try {
+        const names = await loadProductNamesFromBackend(actor);
+        const s = await getOrCreateSheetFromBackend(actor, selectedDate, names);
+        const allSheets = await loadAllSheetsFromBackend(actor);
+        if (!cancelled) {
+          setSheet(s);
+          setAllDates(allSheets.map((sh) => sh.date));
+          setLockedDates(
+            allSheets.filter((sh) => sh.locked).map((sh) => sh.date),
+          );
+          setIsLoading(false);
+        }
+      } catch (err) {
+        console.error("Failed to load sheet:", err);
+        if (!cancelled) {
+          toast.error("Failed to load sheet data from server");
+          setIsLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDate, actor, actorFetching]);
+
+  // Helper to refresh allDates and lockedDates from backend
+  const refreshDatesFromBackend = useCallback(async () => {
+    if (!actor) return;
+    try {
+      const allSheets = await loadAllSheetsFromBackend(actor);
+      setAllDates(allSheets.map((sh) => sh.date));
+      setLockedDates(allSheets.filter((sh) => sh.locked).map((sh) => sh.date));
+    } catch (err) {
+      console.error("Failed to refresh dates:", err);
+    }
+  }, [actor]);
 
   const handleDateSelect = useCallback((date: string) => {
     setSelectedDate(date);
@@ -220,29 +313,45 @@ export default function BPWSheet() {
   }, []);
 
   const handleProductNameChange = useCallback(
-    (idx: number, newName: string) => {
-      setProductNames((prev) => {
-        const updated = prev.map((n, i) => (i === idx ? newName : n));
-        saveProductNames(updated);
-        return updated;
-      });
-      // Also update the product name in the current sheet's rows
+    async (idx: number, newName: string) => {
+      if (!actor) return;
+      const updatedNames = productNames.map((n, i) =>
+        i === idx ? newName : n,
+      );
+      setProductNames(updatedNames);
+      try {
+        await saveProductNamesToBackend(actor, updatedNames);
+      } catch (err) {
+        console.error("Failed to save product names:", err);
+        toast.error("Failed to save product name");
+        return;
+      }
       setSheet((prev) => {
         if (!prev) return prev;
         const newRows = prev.rows.map((row, i) =>
           i === idx ? { ...row, productName: newName } : row,
         );
-        const updated: DailySheet = { ...prev, rows: newRows };
-        saveSheet(updated);
-        return updated;
+        return { ...prev, rows: newRows };
       });
+      // Save the sheet too with updated product name
+      if (sheet) {
+        const newRows = sheet.rows.map((row, i) =>
+          i === idx ? { ...row, productName: newName } : row,
+        );
+        const updated: DailySheet = { ...sheet, rows: newRows };
+        try {
+          await saveSheetToBackend(actor, updated);
+        } catch (err) {
+          console.error("Failed to save sheet:", err);
+        }
+      }
       toast.success("Product name updated");
     },
-    [],
+    [actor, productNames, sheet],
   );
 
   const handleCellChange = useCallback(
-    (
+    async (
       idx: number,
       field: keyof Pick<
         ProductRow,
@@ -250,23 +359,25 @@ export default function BPWSheet() {
       >,
       value: string,
     ) => {
-      if (!sheet || sheet.locked) return;
+      if (!sheet || sheet.locked || !actor) return;
       const num = Math.max(0, Number.parseFloat(value) || 0);
-      setSheet((prev) => {
-        if (!prev) return prev;
-        const newRows = prev.rows.map((row, i) =>
-          i === idx ? { ...row, [field]: num } : row,
-        );
-        const updated: DailySheet = { ...prev, rows: newRows };
-        saveSheet(updated);
-        return updated;
-      });
+      const newRows = sheet.rows.map((row, i) =>
+        i === idx ? { ...row, [field]: num } : row,
+      );
+      const updated: DailySheet = { ...sheet, rows: newRows };
+      setSheet(updated);
+      try {
+        await saveSheetToBackend(actor, updated);
+      } catch (err) {
+        console.error("Failed to save sheet:", err);
+        toast.error("Failed to save changes");
+      }
     },
-    [sheet],
+    [sheet, actor],
   );
 
-  const handleCloseDay = useCallback(() => {
-    if (!sheet || sheet.locked) return;
+  const handleCloseDay = useCallback(async () => {
+    if (!sheet || sheet.locked || !actor) return;
 
     // Lock the sheet — save finalized report at close time
     const report: FinalizedReportRow[] = buildCategoryReport(
@@ -277,7 +388,13 @@ export default function BPWSheet() {
       locked: true,
       finalizedReport: report,
     };
-    saveSheet(locked);
+    try {
+      await saveSheetToBackend(actor, locked);
+    } catch (err) {
+      console.error("Failed to save locked sheet:", err);
+      toast.error("Failed to close day");
+      return;
+    }
     setSheet(locked);
 
     // Compute carry-forward for next day
@@ -292,7 +409,9 @@ export default function BPWSheet() {
         productName: row.productName,
         opening: sc,
         delivery: 0,
+        deliveryCells: [0, 0, 0],
         transfer: 0,
+        transferCells: [0, 0, 0],
         openCounter: tc,
         physical: 0,
         additional: 0,
@@ -305,19 +424,22 @@ export default function BPWSheet() {
       rows: nextRows,
       locked: false,
     };
-    saveSheet(nextSheet);
+    try {
+      await saveSheetToBackend(actor, nextSheet);
+    } catch (err) {
+      console.error("Failed to save next day sheet:", err);
+    }
 
-    setLockedDates(getLockedDates());
-    setAllDates(getAllSheetDates());
+    await refreshDatesFromBackend();
     setShowCloseDialog(false);
 
     toast.success(
       `Day closed! Closing stock carried forward to ${formatShortDate(nextDate)}`,
     );
-  }, [sheet, selectedDate]);
+  }, [sheet, selectedDate, actor, refreshDatesFromBackend]);
 
-  const handleResetDay = useCallback(() => {
-    if (!sheet || sheet.locked) return;
+  const handleResetDay = useCallback(async () => {
+    if (!sheet || sheet.locked || !actor) return;
 
     if (resetPassword !== "225231") {
       setResetPasswordError(true);
@@ -332,18 +454,24 @@ export default function BPWSheet() {
     }));
 
     const resetSheet: DailySheet = { ...sheet, rows: resetRows };
-    saveSheet(resetSheet);
+    try {
+      await saveSheetToBackend(actor, resetSheet);
+    } catch (err) {
+      console.error("Failed to save reset sheet:", err);
+      toast.error("Failed to reset day");
+      return;
+    }
     setSheet(resetSheet);
     setShowResetDialog(false);
     setResetPassword("");
     setResetPasswordError(false);
 
     toast.success("Physical, Additional & POS Count values reset successfully");
-  }, [sheet, resetPassword]);
+  }, [sheet, resetPassword, actor]);
 
   // Admin Reset: resets entire current open day to zero (all columns)
-  const handleAdminReset = useCallback(() => {
-    if (!sheet || sheet.locked) return;
+  const handleAdminReset = useCallback(async () => {
+    if (!sheet || sheet.locked || !actor) return;
 
     if (adminResetPassword !== "9924827787") {
       setAdminResetPasswordError(true);
@@ -355,7 +483,9 @@ export default function BPWSheet() {
       productName,
       opening: 0,
       delivery: 0,
+      deliveryCells: [0, 0, 0] as [number, number, number],
       transfer: 0,
+      transferCells: [0, 0, 0] as [number, number, number],
       openCounter: 0,
       physical: 0,
       additional: 0,
@@ -363,18 +493,24 @@ export default function BPWSheet() {
     }));
 
     const resetSheet: DailySheet = { ...sheet, rows: zeroRows };
-    saveSheet(resetSheet);
+    try {
+      await saveSheetToBackend(actor, resetSheet);
+    } catch (err) {
+      console.error("Failed to save admin reset sheet:", err);
+      toast.error("Failed to perform admin reset");
+      return;
+    }
     setSheet(resetSheet);
     setShowAdminResetDialog(false);
     setAdminResetPassword("");
     setAdminResetPasswordError(false);
 
     toast.success("Admin Reset complete — entire day reset to zero");
-  }, [sheet, adminResetPassword]);
+  }, [sheet, adminResetPassword, actor]);
 
   // Admin Edit: unlock a closed/locked sheet for editing
-  const handleAdminEdit = useCallback(() => {
-    if (!sheet || !sheet.locked) return;
+  const handleAdminEdit = useCallback(async () => {
+    if (!sheet || !sheet.locked || !actor) return;
 
     if (adminEditPassword !== "9924827787") {
       setAdminEditPasswordError(true);
@@ -382,39 +518,58 @@ export default function BPWSheet() {
     }
 
     const unlocked: DailySheet = { ...sheet, locked: false };
-    saveSheet(unlocked);
+    try {
+      await saveSheetToBackend(actor, unlocked);
+    } catch (err) {
+      console.error("Failed to save unlocked sheet:", err);
+      toast.error("Failed to unlock sheet");
+      return;
+    }
     setSheet(unlocked);
-    setLockedDates(getLockedDates());
+    await refreshDatesFromBackend();
     setShowAdminEditDialog(false);
     setAdminEditPassword("");
     setAdminEditPasswordError(false);
 
     toast.success("Sheet unlocked for admin editing");
-  }, [sheet, adminEditPassword]);
+  }, [sheet, adminEditPassword, actor, refreshDatesFromBackend]);
 
   // Default Qty Set: restore Opening & Open Counter from previous closed day's Total BA & Total Counter
-  const handleDefaultQtySet = useCallback(() => {
-    if (!sheet) return;
-    const prev = getMostRecentLockedSheet(selectedDate);
+  const handleDefaultQtySet = useCallback(async () => {
+    if (!sheet || !actor) return;
+    let prev: DailySheet | null;
+    try {
+      prev = await getMostRecentLockedSheetFromBackend(actor, selectedDate);
+    } catch (err) {
+      console.error("Failed to get previous sheet:", err);
+      toast.error("Failed to fetch previous day data");
+      return;
+    }
     if (!prev) {
       toast.error("No previous closed day found to restore quantities from.");
       return;
     }
     const updatedRows = sheet.rows.map((row, idx) => {
-      const prevRow = prev.rows[idx];
+      const prevRow = prev!.rows[idx];
       if (!prevRow) return row;
       const prevTotalBA = calcTotalBA(prevRow);
       const prevTotalCounter = calcTotalCounter(prevRow);
       return { ...row, opening: prevTotalBA, openCounter: prevTotalCounter };
     });
     const updated: DailySheet = { ...sheet, rows: updatedRows };
-    saveSheet(updated);
+    try {
+      await saveSheetToBackend(actor, updated);
+    } catch (err) {
+      console.error("Failed to save sheet:", err);
+      toast.error("Failed to save default quantities");
+      return;
+    }
     setSheet(updated);
     setShowDefaultQtyDialog(false);
     toast.success(
       "Opening & Open Counter restored from previous day's Total BA & Total Counter.",
     );
-  }, [sheet, selectedDate]);
+  }, [sheet, selectedDate, actor]);
 
   const handleDownloadReportPDF = useCallback(() => {
     document.body.classList.add("print-report-only");
@@ -422,53 +577,167 @@ export default function BPWSheet() {
     document.body.classList.remove("print-report-only");
   }, []);
 
-  // Open Delivery Window: capture current delivery values as draft
+  // Open Delivery Window: populate 3-cell draft from existing deliveryCells or delivery value
   const openDeliveryWindow = useCallback(() => {
     if (!sheet) return;
-    setDeliveryDraft(sheet.rows.map((r) => r.delivery));
+    setDeliveryDraft(
+      sheet.rows.map((r) => r.deliveryCells ?? [r.delivery, 0, 0]) as [
+        number,
+        number,
+        number,
+      ][],
+    );
+    // Load saved reasons for delivery cells
+    const reasons: Record<string, string> = {};
+    if (sheet.negativeReasons) {
+      for (const [k, v] of Object.entries(sheet.negativeReasons)) {
+        if (k.startsWith("delivery_")) reasons[k] = v;
+      }
+    }
+    setDraftReasons(reasons);
     setShowDeliveryWindow(true);
   }, [sheet]);
 
-  // Open Transfer Window: capture current transfer values as draft
+  // Open Transfer Window: populate 3-cell draft from existing transferCells or transfer value
   const openTransferWindow = useCallback(() => {
     if (!sheet) return;
-    setTransferDraft(sheet.rows.map((r) => r.transfer));
+    setTransferDraft(
+      sheet.rows.map((r) => r.transferCells ?? [r.transfer, 0, 0]) as [
+        number,
+        number,
+        number,
+      ][],
+    );
+    // Load saved reasons for transfer cells
+    const reasons: Record<string, string> = {};
+    if (sheet.negativeReasons) {
+      for (const [k, v] of Object.entries(sheet.negativeReasons)) {
+        if (k.startsWith("transfer_")) reasons[k] = v;
+      }
+    }
+    setDraftReasons(reasons);
     setShowTransferWindow(true);
   }, [sheet]);
 
-  // Save Delivery Window entries to sheet state
-  const saveDeliveryWindow = useCallback(() => {
-    if (!sheet || sheet.locked) return;
-    setSheet((prev) => {
-      if (!prev) return prev;
-      const newRows = prev.rows.map((row, i) => ({
-        ...row,
-        delivery: deliveryDraft[i] ?? row.delivery,
-      }));
-      const updated: DailySheet = { ...prev, rows: newRows };
-      saveSheet(updated);
-      return updated;
-    });
-    setShowDeliveryWindow(false);
-    toast.success("Delivery quantities saved");
-  }, [sheet, deliveryDraft]);
+  // Helper: build negativeEntries list from current draft + reasons
+  const buildNegativeEntries = useCallback(
+    (
+      type: "delivery" | "transfer",
+      draft: [number, number, number][],
+      reasons: Record<string, string>,
+      existingEntries: NegativeEntry[],
+    ): NegativeEntry[] => {
+      // Remove old entries of this type, then add new ones
+      const kept = existingEntries.filter((e) => e.type !== type);
+      const newEntries: NegativeEntry[] = [];
+      draft.forEach((cells, productIdx) => {
+        cells.forEach((qty, cellIdx) => {
+          if (qty < 0) {
+            const key = `${type}_${productIdx}_${cellIdx}`;
+            newEntries.push({
+              type,
+              productIdx,
+              cellIdx,
+              qty,
+              reason: reasons[key] ?? "",
+            });
+          }
+        });
+      });
+      return [...kept, ...newEntries];
+    },
+    [],
+  );
 
-  // Save Transfer Window entries to sheet state
-  const saveTransferWindow = useCallback(() => {
-    if (!sheet || sheet.locked) return;
-    setSheet((prev) => {
-      if (!prev) return prev;
-      const newRows = prev.rows.map((row, i) => ({
+  // Save Delivery Window entries: sum 3 cells, store total + cells + reasons
+  const saveDeliveryWindow = useCallback(async () => {
+    if (!sheet || sheet.locked || !actor) return;
+    const newRows = sheet.rows.map((row, i) => {
+      const cells = deliveryDraft[i] ??
+        row.deliveryCells ?? [row.delivery, 0, 0];
+      const total = cells[0] + cells[1] + cells[2];
+      return {
         ...row,
-        transfer: transferDraft[i] ?? row.transfer,
-      }));
-      const updated: DailySheet = { ...prev, rows: newRows };
-      saveSheet(updated);
-      return updated;
+        deliveryCells: cells as [number, number, number],
+        delivery: total,
+      };
     });
+    // Merge reasons: keep transfer reasons, replace delivery reasons
+    const existingReasons = sheet.negativeReasons ?? {};
+    const cleanedReasons: Record<string, string> = {};
+    for (const [k, v] of Object.entries(existingReasons)) {
+      if (!k.startsWith("delivery_")) cleanedReasons[k] = v;
+    }
+    const mergedReasons = { ...cleanedReasons, ...draftReasons };
+    const negativeEntries = buildNegativeEntries(
+      "delivery",
+      deliveryDraft,
+      draftReasons,
+      sheet.negativeEntries ?? [],
+    );
+    const updated: DailySheet = {
+      ...sheet,
+      rows: newRows,
+      negativeReasons: mergedReasons,
+      negativeEntries,
+    };
+    try {
+      await saveSheetToBackend(actor, updated);
+    } catch (err) {
+      console.error("Failed to save delivery entries:", err);
+      toast.error("Failed to save delivery quantities");
+      return;
+    }
+    setSheet(updated);
+    setShowDeliveryWindow(false);
+    setDraftReasons({});
+    toast.success("Delivery quantities saved");
+  }, [sheet, deliveryDraft, draftReasons, buildNegativeEntries, actor]);
+
+  // Save Transfer Window entries: sum 3 cells, store total + cells + reasons
+  const saveTransferWindow = useCallback(async () => {
+    if (!sheet || sheet.locked || !actor) return;
+    const newRows = sheet.rows.map((row, i) => {
+      const cells = transferDraft[i] ??
+        row.transferCells ?? [row.transfer, 0, 0];
+      const total = cells[0] + cells[1] + cells[2];
+      return {
+        ...row,
+        transferCells: cells as [number, number, number],
+        transfer: total,
+      };
+    });
+    // Merge reasons: keep delivery reasons, replace transfer reasons
+    const existingReasons = sheet.negativeReasons ?? {};
+    const cleanedReasons: Record<string, string> = {};
+    for (const [k, v] of Object.entries(existingReasons)) {
+      if (!k.startsWith("transfer_")) cleanedReasons[k] = v;
+    }
+    const mergedReasons = { ...cleanedReasons, ...draftReasons };
+    const negativeEntries = buildNegativeEntries(
+      "transfer",
+      transferDraft,
+      draftReasons,
+      sheet.negativeEntries ?? [],
+    );
+    const updated: DailySheet = {
+      ...sheet,
+      rows: newRows,
+      negativeReasons: mergedReasons,
+      negativeEntries,
+    };
+    try {
+      await saveSheetToBackend(actor, updated);
+    } catch (err) {
+      console.error("Failed to save transfer entries:", err);
+      toast.error("Failed to save transfer quantities");
+      return;
+    }
+    setSheet(updated);
     setShowTransferWindow(false);
+    setDraftReasons({});
     toast.success("Transfer quantities saved");
-  }, [sheet, transferDraft]);
+  }, [sheet, transferDraft, draftReasons, buildNegativeEntries, actor]);
 
   const computedRows = sheet ? sheet.rows.map(computeRow) : [];
   const categoryReport = buildCategoryReport(computedRows);
@@ -478,6 +747,66 @@ export default function BPWSheet() {
 
   return (
     <div className="h-screen flex flex-col bg-background overflow-hidden">
+      {/* ─── PWA Install Banner ─── */}
+      {showInstallBanner && (
+        <div
+          className="no-print flex items-center justify-between gap-3 px-4 py-2.5 text-white text-sm shrink-0"
+          style={{
+            background:
+              "linear-gradient(90deg, oklch(0.25 0.1 249), oklch(0.32 0.12 249))",
+          }}
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <img
+              src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+              alt="22523 BPW"
+              className="w-8 h-8 object-contain rounded shrink-0"
+              style={{ background: "rgba(255,255,255,0.1)" }}
+            />
+            <div className="min-w-0">
+              <span className="font-bold mr-2">22523 BPW</span>
+              {isIOS ? (
+                <span className="text-white/80 text-xs">
+                  To install: tap the share icon and select &apos;Add to Home
+                  Screen&apos;
+                </span>
+              ) : (
+                <span className="text-white/80 text-xs">
+                  Install this app on your device for quick access
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {!isIOS && deferredPromptRef.current && (
+              <button
+                type="button"
+                className="px-3 py-1 rounded-md bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-semibold transition-colors"
+                onClick={() => {
+                  if (deferredPromptRef.current) {
+                    deferredPromptRef.current.prompt();
+                    deferredPromptRef.current = null;
+                  }
+                  setShowInstallBanner(false);
+                }}
+              >
+                Install App
+              </button>
+            )}
+            <button
+              type="button"
+              className="p-1 rounded hover:bg-white/20 transition-colors"
+              onClick={() => {
+                localStorage.setItem("pwa-banner-dismissed", "1");
+                setShowInstallBanner(false);
+              }}
+              aria-label="Dismiss install banner"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
       {/* ─── Header ─── */}
       <header
         className="no-print sticky top-0 z-30 shrink-0 flex items-center justify-between px-4 py-3 gap-3"
@@ -500,9 +829,12 @@ export default function BPWSheet() {
             Calendar
           </Button>
           <div className="w-px h-6 bg-white/20" />
-          <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center shrink-0">
-            <StoreIcon className="w-4 h-4 text-white" />
-          </div>
+          <img
+            src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+            alt="22523 BPW Logo"
+            className="w-9 h-9 object-contain rounded-lg"
+            style={{ background: "rgba(255,255,255,0.1)" }}
+          />
           <div>
             <h1 className="text-white font-bold text-sm leading-none">
               Store 22523
@@ -715,13 +1047,24 @@ export default function BPWSheet() {
         <main className="flex-1 overflow-auto p-4">
           {/* Sheet title for print */}
           <div className="print-only mb-4">
-            <h2 className="text-lg font-bold">Store 22523 — BPW Daily Sheet</h2>
-            <p className="text-sm text-gray-600">
-              {formatLongDate(selectedDate)}
-            </p>
-            {sheet?.locked && (
-              <p className="text-xs text-gray-500">Sheet Status: CLOSED</p>
-            )}
+            <div className="flex items-center gap-3 mb-2">
+              <img
+                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                alt="22523 BPW"
+                className="w-12 h-12 object-contain"
+              />
+              <div>
+                <h2 className="text-lg font-bold">
+                  Store 22523 — BPW Daily Sheet
+                </h2>
+                <p className="text-sm text-gray-600">
+                  {formatLongDate(selectedDate)}
+                </p>
+                {sheet?.locked && (
+                  <p className="text-xs text-gray-500">Sheet Status: CLOSED</p>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* Sheet header info */}
@@ -743,7 +1086,15 @@ export default function BPWSheet() {
             </div>
           </div>
 
-          {sheet ? (
+          {isLoading || !sheet ? (
+            <div
+              data-ocid="sheet.loading_state"
+              className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground"
+            >
+              <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              <p className="text-sm">Loading sheet data...</p>
+            </div>
+          ) : (
             <SheetTable
               computedRows={computedRows}
               locked={sheet.locked}
@@ -753,13 +1104,6 @@ export default function BPWSheet() {
               onOpenDeliveryWindow={openDeliveryWindow}
               onOpenTransferWindow={openTransferWindow}
             />
-          ) : (
-            <div
-              data-ocid="sheet.loading_state"
-              className="flex items-center justify-center py-24 text-muted-foreground"
-            >
-              Loading sheet...
-            </div>
           )}
 
           {/* ─── Finalized Report Section ─── */}
@@ -803,13 +1147,20 @@ export default function BPWSheet() {
                   </div>
                 </div>
                 {/* Print-only header for this section */}
-                <div className="print-only px-4 py-3 border-b border-gray-200">
-                  <h3 className="font-bold text-base">
-                    Category Report — {formatLongDate(selectedDate)}
-                  </h3>
-                  <p className="text-xs text-gray-500">
-                    Store 22523 · BPW Daily Sheet · Finalized
-                  </p>
+                <div className="print-only px-4 py-3 border-b border-gray-200 flex items-center gap-3">
+                  <img
+                    src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                    alt="22523 BPW"
+                    className="w-10 h-10 object-contain"
+                  />
+                  <div>
+                    <h3 className="font-bold text-base">
+                      Category Report — {formatLongDate(selectedDate)}
+                    </h3>
+                    <p className="text-xs text-gray-500">
+                      Store 22523 · BPW Daily Sheet · Finalized
+                    </p>
+                  </div>
                 </div>
                 {/* Report table */}
                 <table className="w-full text-sm">
@@ -863,6 +1214,82 @@ export default function BPWSheet() {
                     ))}
                   </tbody>
                 </table>
+
+                {/* ── Loan / BA Transfer Summary ── */}
+                {sheet.negativeEntries && sheet.negativeEntries.length > 0 && (
+                  <div className="border-t border-border mt-0">
+                    <div className="px-4 py-2.5 bg-red-50 border-b border-red-200 flex items-center gap-2">
+                      <ShieldAlert className="w-4 h-4 text-red-600 shrink-0" />
+                      <span className="font-bold text-sm text-red-800">
+                        Loan / BA Transfer Summary
+                      </span>
+                      <span className="text-xs text-red-600 bg-red-100 px-2 py-0.5 rounded-full">
+                        Negative Entries
+                      </span>
+                    </div>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-red-50/60">
+                          <th className="px-4 py-2 text-left text-xs font-semibold text-red-800 uppercase tracking-wide">
+                            Product
+                          </th>
+                          <th className="px-4 py-2 text-center text-xs font-semibold text-red-800 uppercase tracking-wide">
+                            Type
+                          </th>
+                          <th className="px-4 py-2 text-center text-xs font-semibold text-red-800 uppercase tracking-wide">
+                            Entry #
+                          </th>
+                          <th className="px-4 py-2 text-center text-xs font-semibold text-red-800 uppercase tracking-wide">
+                            Qty
+                          </th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold text-red-800 uppercase tracking-wide">
+                            Reason
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-red-100">
+                        {sheet.negativeEntries.map((entry, ei) => (
+                          <tr
+                            key={`${entry.type}_${entry.productIdx}_${entry.cellIdx}_${ei}`}
+                            className="hover:bg-red-50/40"
+                          >
+                            <td className="px-4 py-2 text-sm font-medium text-foreground">
+                              {productNames[entry.productIdx] ??
+                                `Product ${entry.productIdx + 1}`}
+                            </td>
+                            <td className="px-4 py-2 text-center">
+                              <span
+                                className={cn(
+                                  "inline-block px-2 py-0.5 rounded text-xs font-semibold",
+                                  entry.type === "delivery"
+                                    ? "bg-blue-100 text-blue-700"
+                                    : "bg-purple-100 text-purple-700",
+                                )}
+                              >
+                                {entry.type === "delivery"
+                                  ? "Delivery"
+                                  : "Transfer"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2 text-center text-sm text-muted-foreground">
+                              Entry {entry.cellIdx + 1}
+                            </td>
+                            <td className="px-4 py-2 text-center font-mono font-bold text-red-600">
+                              {entry.qty}
+                            </td>
+                            <td className="px-4 py-2 text-sm text-foreground">
+                              {entry.reason || (
+                                <span className="text-muted-foreground italic">
+                                  No reason given
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
         </main>
@@ -896,6 +1323,11 @@ export default function BPWSheet() {
             <>
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
+                  <img
+                    src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                    alt=""
+                    className="w-6 h-6 object-contain opacity-80"
+                  />
                   <BarChart2 className="w-5 h-5 text-indigo-500" />
                   Category Report
                 </DialogTitle>
@@ -989,6 +1421,11 @@ export default function BPWSheet() {
             <>
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
+                  <img
+                    src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                    alt=""
+                    className="w-6 h-6 object-contain opacity-80"
+                  />
                   <Lock className="w-5 h-5 text-amber-500" />
                   Finalize Report
                 </DialogTitle>
@@ -1067,6 +1504,11 @@ export default function BPWSheet() {
         <DialogContent data-ocid="close.dialog">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
+              <img
+                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                alt=""
+                className="w-6 h-6 object-contain opacity-80"
+              />
               <Lock className="w-5 h-5 text-amber-500" />
               Close Day?
             </DialogTitle>
@@ -1111,6 +1553,11 @@ export default function BPWSheet() {
         <DialogContent data-ocid="reset.dialog">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
+              <img
+                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                alt=""
+                className="w-6 h-6 object-contain opacity-80"
+              />
               <RotateCcw className="w-5 h-5 text-red-500" />
               Reset Physical, Additional &amp; POS Count?
             </DialogTitle>
@@ -1190,6 +1637,11 @@ export default function BPWSheet() {
         <DialogContent data-ocid="admin_reset.dialog">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
+              <img
+                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                alt=""
+                className="w-6 h-6 object-contain opacity-80"
+              />
               <ShieldAlert className="w-5 h-5 text-orange-500" />
               Admin Reset — Entire Day to Zero?
             </DialogTitle>
@@ -1270,6 +1722,11 @@ export default function BPWSheet() {
         <DialogContent data-ocid="admin_edit.dialog">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
+              <img
+                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                alt=""
+                className="w-6 h-6 object-contain opacity-80"
+              />
               <LockOpen className="w-5 h-5 text-emerald-500" />
               Admin Edit — Unlock Closed Sheet
             </DialogTitle>
@@ -1342,6 +1799,11 @@ export default function BPWSheet() {
         <DialogContent data-ocid="default_qty.dialog">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
+              <img
+                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                alt=""
+                className="w-6 h-6 object-contain opacity-80"
+              />
               <ClipboardList className="w-5 h-5 text-teal-500" />
               Default Qty Set — Restore from Previous Day?
             </DialogTitle>
@@ -1373,19 +1835,104 @@ export default function BPWSheet() {
         </DialogContent>
       </Dialog>
 
+      {/* ─── Negative Entry Reason Dialog ─── */}
+      <Dialog
+        open={pendingReason !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            // If user dismisses without saving, clear the pending reason
+            setPendingReason(null);
+            setReasonDraft("");
+          }
+        }}
+      >
+        <DialogContent
+          data-ocid="negative_reason.dialog"
+          className="sm:max-w-sm"
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <img
+                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                alt=""
+                className="w-6 h-6 object-contain opacity-80"
+              />
+              <ShieldAlert className="w-5 h-5" />
+              Negative Entry — Reason Required
+            </DialogTitle>
+            <DialogDescription>
+              You entered{" "}
+              <span className="font-mono font-bold text-red-600">
+                {pendingReason?.qty}
+              </span>{" "}
+              for{" "}
+              <span className="font-semibold">
+                {pendingReason ? productNames[pendingReason.productIdx] : ""}
+              </span>{" "}
+              ({pendingReason?.type === "delivery" ? "Delivery" : "Transfer"}{" "}
+              Entry {(pendingReason?.cellIdx ?? 0) + 1}).
+              <br />
+              Please provide a reason (e.g. Loan given to another store).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-2">
+            <textarea
+              rows={3}
+              placeholder="e.g. Loan given to Store 22524 — to be returned"
+              value={reasonDraft}
+              onChange={(e) => setReasonDraft(e.target.value)}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-red-400 focus:border-red-400 resize-none"
+            />
+          </div>
+          <DialogFooter className="gap-2 mt-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setPendingReason(null);
+                setReasonDraft("");
+              }}
+            >
+              Skip
+            </Button>
+            <Button
+              className="bg-red-600 hover:bg-red-700 text-white"
+              disabled={!reasonDraft.trim()}
+              onClick={() => {
+                if (!pendingReason) return;
+                const key = `${pendingReason.type}_${pendingReason.productIdx}_${pendingReason.cellIdx}`;
+                setDraftReasons((prev) => ({
+                  ...prev,
+                  [key]: reasonDraft.trim(),
+                }));
+                setPendingReason(null);
+                setReasonDraft("");
+              }}
+            >
+              Save Reason
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* ─── Delivery Window Dialog ─── */}
       <Dialog
         open={showDeliveryWindow}
         onOpenChange={(open) => setShowDeliveryWindow(open)}
       >
-        <DialogContent data-ocid="delivery.dialog" className="sm:max-w-md">
+        <DialogContent data-ocid="delivery.dialog" className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
+              <img
+                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                alt=""
+                className="w-6 h-6 object-contain opacity-80"
+              />
               <LayoutList className="w-5 h-5 text-blue-500" />
               Delivery Entry — {formatLongDate(selectedDate)}
             </DialogTitle>
             <DialogDescription>
-              Enter delivery quantities for each product.
+              3 entry slots per product. Negative values indicate loans given
+              from BA area. Total is saved to the sheet.
             </DialogDescription>
           </DialogHeader>
 
@@ -1396,52 +1943,140 @@ export default function BPWSheet() {
             </div>
           )}
 
-          <ScrollArea className="max-h-[60vh]">
+          {/* Column headers */}
+          <div className="flex items-center gap-2 px-3 pb-1 border-b border-border">
+            <span className="text-xs font-semibold text-muted-foreground flex-1 min-w-0">
+              Product
+            </span>
+            <span className="text-xs font-semibold text-muted-foreground w-16 text-center">
+              Entry 1
+            </span>
+            <span className="text-xs font-semibold text-muted-foreground w-16 text-center">
+              Entry 2
+            </span>
+            <span className="text-xs font-semibold text-muted-foreground w-16 text-center">
+              Entry 3
+            </span>
+            <span className="text-xs font-semibold text-blue-600 w-16 text-center">
+              Total
+            </span>
+          </div>
+
+          <ScrollArea className="max-h-[55vh]">
             <div className="pr-3">
-              {productNames.map((name, idx) => (
-                <div
-                  key={name}
-                  data-ocid={`delivery.item.${idx + 1}`}
-                  className={cn(
-                    "flex items-center justify-between gap-3 px-3 py-2 rounded",
-                    idx % 2 === 0 ? "bg-muted/30" : "bg-transparent",
-                  )}
-                >
-                  <span className="text-sm text-foreground flex-1 min-w-0 leading-tight">
-                    {name}
-                  </span>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="0"
-                    disabled={sheet?.locked ?? true}
-                    value={
-                      deliveryDraft[idx] === 0 ? "" : (deliveryDraft[idx] ?? "")
-                    }
-                    onChange={(e) => {
-                      const val = Math.max(
-                        0,
-                        Number.parseFloat(e.target.value) || 0,
-                      );
-                      setDeliveryDraft((prev) => {
-                        const next = [...prev];
-                        next[idx] = val;
-                        return next;
-                      });
-                    }}
-                    style={
-                      { MozAppearance: "textfield" } as React.CSSProperties
-                    }
+              {productNames.map((name, idx) => {
+                const cells = deliveryDraft[idx] ?? [0, 0, 0];
+                const rowTotal =
+                  (cells[0] || 0) + (cells[1] || 0) + (cells[2] || 0);
+                const rowHasNegative = cells.some((c) => c < 0);
+                return (
+                  <div
+                    key={name}
+                    data-ocid={`delivery.item.${idx + 1}`}
                     className={cn(
-                      "min-w-[80px] w-20 h-8 text-center text-sm font-mono border border-input rounded px-2 bg-background",
-                      "focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary",
-                      "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
-                      (sheet?.locked ?? true) &&
-                        "bg-muted/40 cursor-not-allowed text-muted-foreground border-border",
+                      "px-3 py-1.5 rounded",
+                      idx % 2 === 0 ? "bg-muted/30" : "bg-transparent",
+                      rowHasNegative && "ring-1 ring-red-200",
                     )}
-                  />
-                </div>
-              ))}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="text-sm text-foreground flex-1 min-w-0 leading-tight truncate"
+                        title={name}
+                      >
+                        {name}
+                      </span>
+                      {([0, 1, 2] as const).map((cellIdx) => {
+                        const key = `delivery_${idx}_${cellIdx}`;
+                        const isNeg = (cells[cellIdx] ?? 0) < 0;
+                        return (
+                          <div
+                            key={cellIdx}
+                            className="flex flex-col items-center gap-0.5"
+                          >
+                            <input
+                              type="number"
+                              placeholder="0"
+                              disabled={sheet?.locked ?? true}
+                              value={cells[cellIdx] === 0 ? "" : cells[cellIdx]}
+                              onChange={(e) => {
+                                const val =
+                                  Number.parseFloat(e.target.value) || 0;
+                                setDeliveryDraft((prev) => {
+                                  const next = prev.map(
+                                    (c) => [...c] as [number, number, number],
+                                  );
+                                  if (!next[idx]) next[idx] = [0, 0, 0];
+                                  next[idx][cellIdx] = val;
+                                  return next;
+                                });
+                              }}
+                              onBlur={(e) => {
+                                const val =
+                                  Number.parseFloat(e.target.value) || 0;
+                                if (val < 0 && !(sheet?.locked ?? true)) {
+                                  setPendingReason({
+                                    type: "delivery",
+                                    productIdx: idx,
+                                    cellIdx,
+                                    qty: val,
+                                  });
+                                  setReasonDraft(draftReasons[key] ?? "");
+                                }
+                              }}
+                              style={
+                                {
+                                  MozAppearance: "textfield",
+                                } as React.CSSProperties
+                              }
+                              className={cn(
+                                "w-16 h-8 text-center text-sm font-mono border border-input rounded px-1 bg-background",
+                                "focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400",
+                                "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
+                                isNeg &&
+                                  "text-red-600 border-red-300 bg-red-50",
+                                (sheet?.locked ?? true) &&
+                                  "bg-muted/40 cursor-not-allowed text-muted-foreground border-border",
+                              )}
+                            />
+                          </div>
+                        );
+                      })}
+                      <span
+                        className={cn(
+                          "w-16 h-8 flex items-center justify-center text-sm font-mono font-semibold rounded border",
+                          rowTotal < 0
+                            ? "text-red-600 bg-red-50 border-red-200"
+                            : rowTotal > 0
+                              ? "text-blue-700 bg-blue-50 border-blue-200"
+                              : "text-muted-foreground bg-muted/20 border-border",
+                        )}
+                      >
+                        {rowTotal}
+                      </span>
+                    </div>
+                    {/* Show reasons for negative cells */}
+                    {rowHasNegative && (
+                      <div className="mt-1 ml-1 space-y-0.5">
+                        {([0, 1, 2] as const).map((cellIdx) => {
+                          const key = `delivery_${idx}_${cellIdx}`;
+                          const reason = draftReasons[key];
+                          if ((cells[cellIdx] ?? 0) >= 0 || !reason)
+                            return null;
+                          return (
+                            <p
+                              key={cellIdx}
+                              className="text-[10px] text-red-600 leading-tight"
+                            >
+                              Entry {cellIdx + 1} ({cells[cellIdx]}): {reason}
+                            </p>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </ScrollArea>
 
@@ -1482,14 +2117,20 @@ export default function BPWSheet() {
         open={showTransferWindow}
         onOpenChange={(open) => setShowTransferWindow(open)}
       >
-        <DialogContent data-ocid="transfer.dialog" className="sm:max-w-md">
+        <DialogContent data-ocid="transfer.dialog" className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
+              <img
+                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                alt=""
+                className="w-6 h-6 object-contain opacity-80"
+              />
               <LayoutList className="w-5 h-5 text-purple-500" />
               Transfer Entry — {formatLongDate(selectedDate)}
             </DialogTitle>
             <DialogDescription>
-              Enter transfer quantities for each product.
+              3 entry slots per product. Negative values indicate loans given
+              from BA area. Total is saved to the sheet.
             </DialogDescription>
           </DialogHeader>
 
@@ -1500,52 +2141,140 @@ export default function BPWSheet() {
             </div>
           )}
 
-          <ScrollArea className="max-h-[60vh]">
+          {/* Column headers */}
+          <div className="flex items-center gap-2 px-3 pb-1 border-b border-border">
+            <span className="text-xs font-semibold text-muted-foreground flex-1 min-w-0">
+              Product
+            </span>
+            <span className="text-xs font-semibold text-muted-foreground w-16 text-center">
+              Entry 1
+            </span>
+            <span className="text-xs font-semibold text-muted-foreground w-16 text-center">
+              Entry 2
+            </span>
+            <span className="text-xs font-semibold text-muted-foreground w-16 text-center">
+              Entry 3
+            </span>
+            <span className="text-xs font-semibold text-purple-600 w-16 text-center">
+              Total
+            </span>
+          </div>
+
+          <ScrollArea className="max-h-[55vh]">
             <div className="pr-3">
-              {productNames.map((name, idx) => (
-                <div
-                  key={name}
-                  data-ocid={`transfer.item.${idx + 1}`}
-                  className={cn(
-                    "flex items-center justify-between gap-3 px-3 py-2 rounded",
-                    idx % 2 === 0 ? "bg-muted/30" : "bg-transparent",
-                  )}
-                >
-                  <span className="text-sm text-foreground flex-1 min-w-0 leading-tight">
-                    {name}
-                  </span>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="0"
-                    disabled={sheet?.locked ?? true}
-                    value={
-                      transferDraft[idx] === 0 ? "" : (transferDraft[idx] ?? "")
-                    }
-                    onChange={(e) => {
-                      const val = Math.max(
-                        0,
-                        Number.parseFloat(e.target.value) || 0,
-                      );
-                      setTransferDraft((prev) => {
-                        const next = [...prev];
-                        next[idx] = val;
-                        return next;
-                      });
-                    }}
-                    style={
-                      { MozAppearance: "textfield" } as React.CSSProperties
-                    }
+              {productNames.map((name, idx) => {
+                const cells = transferDraft[idx] ?? [0, 0, 0];
+                const rowTotal =
+                  (cells[0] || 0) + (cells[1] || 0) + (cells[2] || 0);
+                const rowHasNegative = cells.some((c) => c < 0);
+                return (
+                  <div
+                    key={name}
+                    data-ocid={`transfer.item.${idx + 1}`}
                     className={cn(
-                      "min-w-[80px] w-20 h-8 text-center text-sm font-mono border border-input rounded px-2 bg-background",
-                      "focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary",
-                      "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
-                      (sheet?.locked ?? true) &&
-                        "bg-muted/40 cursor-not-allowed text-muted-foreground border-border",
+                      "px-3 py-1.5 rounded",
+                      idx % 2 === 0 ? "bg-muted/30" : "bg-transparent",
+                      rowHasNegative && "ring-1 ring-red-200",
                     )}
-                  />
-                </div>
-              ))}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="text-sm text-foreground flex-1 min-w-0 leading-tight truncate"
+                        title={name}
+                      >
+                        {name}
+                      </span>
+                      {([0, 1, 2] as const).map((cellIdx) => {
+                        const key = `transfer_${idx}_${cellIdx}`;
+                        const isNeg = (cells[cellIdx] ?? 0) < 0;
+                        return (
+                          <div
+                            key={cellIdx}
+                            className="flex flex-col items-center gap-0.5"
+                          >
+                            <input
+                              type="number"
+                              placeholder="0"
+                              disabled={sheet?.locked ?? true}
+                              value={cells[cellIdx] === 0 ? "" : cells[cellIdx]}
+                              onChange={(e) => {
+                                const val =
+                                  Number.parseFloat(e.target.value) || 0;
+                                setTransferDraft((prev) => {
+                                  const next = prev.map(
+                                    (c) => [...c] as [number, number, number],
+                                  );
+                                  if (!next[idx]) next[idx] = [0, 0, 0];
+                                  next[idx][cellIdx] = val;
+                                  return next;
+                                });
+                              }}
+                              onBlur={(e) => {
+                                const val =
+                                  Number.parseFloat(e.target.value) || 0;
+                                if (val < 0 && !(sheet?.locked ?? true)) {
+                                  setPendingReason({
+                                    type: "transfer",
+                                    productIdx: idx,
+                                    cellIdx,
+                                    qty: val,
+                                  });
+                                  setReasonDraft(draftReasons[key] ?? "");
+                                }
+                              }}
+                              style={
+                                {
+                                  MozAppearance: "textfield",
+                                } as React.CSSProperties
+                              }
+                              className={cn(
+                                "w-16 h-8 text-center text-sm font-mono border border-input rounded px-1 bg-background",
+                                "focus:outline-none focus:ring-1 focus:ring-purple-400 focus:border-purple-400",
+                                "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
+                                isNeg &&
+                                  "text-red-600 border-red-300 bg-red-50",
+                                (sheet?.locked ?? true) &&
+                                  "bg-muted/40 cursor-not-allowed text-muted-foreground border-border",
+                              )}
+                            />
+                          </div>
+                        );
+                      })}
+                      <span
+                        className={cn(
+                          "w-16 h-8 flex items-center justify-center text-sm font-mono font-semibold rounded border",
+                          rowTotal < 0
+                            ? "text-red-600 bg-red-50 border-red-200"
+                            : rowTotal > 0
+                              ? "text-purple-700 bg-purple-50 border-purple-200"
+                              : "text-muted-foreground bg-muted/20 border-border",
+                        )}
+                      >
+                        {rowTotal}
+                      </span>
+                    </div>
+                    {/* Show reasons for negative cells */}
+                    {rowHasNegative && (
+                      <div className="mt-1 ml-1 space-y-0.5">
+                        {([0, 1, 2] as const).map((cellIdx) => {
+                          const key = `transfer_${idx}_${cellIdx}`;
+                          const reason = draftReasons[key];
+                          if ((cells[cellIdx] ?? 0) >= 0 || !reason)
+                            return null;
+                          return (
+                            <p
+                              key={cellIdx}
+                              className="text-[10px] text-red-600 leading-tight"
+                            >
+                              Entry {cellIdx + 1} ({cells[cellIdx]}): {reason}
+                            </p>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </ScrollArea>
 

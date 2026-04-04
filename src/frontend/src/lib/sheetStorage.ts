@@ -56,8 +56,10 @@ export const PRODUCTS = DEFAULT_PRODUCTS;
 export interface ProductRow {
   productName: string;
   opening: number; // locked, carry-forward from previous Store Closing
-  delivery: number; // manual
-  transfer: number; // manual
+  delivery: number; // manual – sum of deliveryCells
+  deliveryCells: [number, number, number]; // three individual delivery entries
+  transfer: number; // manual – sum of transferCells
+  transferCells: [number, number, number]; // three individual transfer entries
   openCounter: number; // locked, carry-forward from previous Total Counter + transfer
   physical: number; // manual
   additional: number; // manual
@@ -70,11 +72,21 @@ export interface FinalizedReportRow {
   status: "Excess" | "Short" | "Tally";
 }
 
+export interface NegativeEntry {
+  type: "delivery" | "transfer";
+  productIdx: number;
+  cellIdx: number; // 0, 1, or 2
+  qty: number;
+  reason: string;
+}
+
 export interface DailySheet {
   date: string; // YYYY-MM-DD
   rows: ProductRow[];
   locked: boolean;
   finalizedReport?: FinalizedReportRow[]; // saved when day is closed via Run Report
+  negativeReasons?: Record<string, string>; // key: "delivery_idx_cell" or "transfer_idx_cell"
+  negativeEntries?: NegativeEntry[]; // full log of negative entries with reasons
 }
 
 /** Build a blank row for a product */
@@ -87,11 +99,22 @@ export function emptyRow(
     productName,
     opening,
     delivery: 0,
+    deliveryCells: [0, 0, 0],
     transfer: 0,
+    transferCells: [0, 0, 0],
     openCounter,
     physical: 0,
     additional: 0,
     posCount: 0,
+  };
+}
+
+/** Ensure legacy rows (missing deliveryCells/transferCells) are upgraded */
+export function migrateRow(row: ProductRow): ProductRow {
+  return {
+    ...row,
+    deliveryCells: row.deliveryCells ?? [row.delivery, 0, 0],
+    transferCells: row.transferCells ?? [row.transfer, 0, 0],
   };
 }
 
@@ -100,7 +123,9 @@ export function loadAllSheets(): DailySheet[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
-    return JSON.parse(raw) as DailySheet[];
+    const sheets = JSON.parse(raw) as DailySheet[];
+    // Migrate legacy rows
+    return sheets.map((s) => ({ ...s, rows: s.rows.map(migrateRow) }));
   } catch {
     return [];
   }

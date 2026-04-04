@@ -89,210 +89,278 @@ export class ExternalBlob {
         return this;
     }
 }
-export interface Session {
-    sessionType: string;
-    entries: Array<StockEntry>;
-    savedAt: bigint;
+export interface ProductRow {
+    opening: number;
+    productName: string;
+    delivery: number;
+    transferCells: Array<number>;
+    openCounter: number;
+    additional: number;
+    physical: number;
+    transfer: number;
+    posCount: number;
+    deliveryCells: Array<number>;
+}
+export interface ProductNameKey {
+    index: bigint;
+}
+export interface ProductNameEntry {
+    key: ProductNameKey;
+    value: ProductNameValue;
 }
 export interface DailySheet {
+    negativeEntries: Array<NegativeEntry>;
     date: string;
-    isClosed: boolean;
-    closedAt?: bigint;
-    sessions: Array<Session>;
+    rows: Array<ProductRow>;
+    locked: boolean;
+    negativeReasons: Array<[string, string]>;
+    finalizedReport?: Array<ReportRow>;
 }
-export interface Product {
-    id: bigint;
+export interface NegativeEntry {
+    entryType: string;
+    cellIndex: bigint;
+    quantity: number;
+    productIndex: bigint;
+    reason: string;
+}
+export interface SheetEntry {
+    key: SheetKey;
+    value: SheetValue;
+}
+export interface SheetKey {
+    date: string;
+}
+export interface ReportRow {
+    status: string;
+    reportLabel: string;
+    variance: number;
+}
+export interface SheetValue {
+    sheet: DailySheet;
+}
+export interface ProductNameValue {
     name: string;
-    unit: string;
-}
-export interface StockEntry {
-    receivedQty: number;
-    productId: bigint;
-    actualClosing: number;
-    soldQty: number;
-    openingStock: number;
 }
 export interface backendInterface {
-    closeDay(date: string): Promise<void>;
-    getAllStockForDay(date: string): Promise<Array<StockEntry>>;
-    getClosedDates(): Promise<Array<string>>;
-    getDailySheet(date: string): Promise<DailySheet | null>;
-    getDaysByStatus(isClosed: boolean): Promise<Array<string>>;
-    getDiffForDay(date: string): Promise<Array<StockEntry>>;
-    getOpeningStockForNewDay(date: string): Promise<Array<StockEntry>>;
-    getProducts(): Promise<Array<Product>>;
-    initializeProducts(): Promise<void>;
-    saveSession(date: string, session: Session): Promise<void>;
+    getNegativeEntries(date: string): Promise<Array<NegativeEntry> | null>;
+    getProductName(index: bigint): Promise<string | null>;
+    loadAllSheets(): Promise<Array<SheetEntry>>;
+    loadProductNames(): Promise<Array<ProductNameEntry>>;
+    loadSheet(date: string): Promise<DailySheet | null>;
+    lockSheet(date: string): Promise<boolean>;
+    saveProductNames(names: Array<string>): Promise<void>;
+    saveSheet(sheet: DailySheet): Promise<void>;
 }
-import type { DailySheet as _DailySheet, Session as _Session } from "./declarations/backend.did.d.ts";
+import type { DailySheet as _DailySheet, NegativeEntry as _NegativeEntry, ProductRow as _ProductRow, ReportRow as _ReportRow, SheetEntry as _SheetEntry, SheetKey as _SheetKey, SheetValue as _SheetValue } from "./declarations/backend.did.d.ts";
 export class Backend implements backendInterface {
     constructor(private actor: ActorSubclass<_SERVICE>, private _uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, private _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, private processError?: (error: unknown) => never){}
-    async closeDay(arg0: string): Promise<void> {
+    async getNegativeEntries(arg0: string): Promise<Array<NegativeEntry> | null> {
         if (this.processError) {
             try {
-                const result = await this.actor.closeDay(arg0);
-                return result;
-            } catch (e) {
-                this.processError(e);
-                throw new Error("unreachable");
-            }
-        } else {
-            const result = await this.actor.closeDay(arg0);
-            return result;
-        }
-    }
-    async getAllStockForDay(arg0: string): Promise<Array<StockEntry>> {
-        if (this.processError) {
-            try {
-                const result = await this.actor.getAllStockForDay(arg0);
-                return result;
-            } catch (e) {
-                this.processError(e);
-                throw new Error("unreachable");
-            }
-        } else {
-            const result = await this.actor.getAllStockForDay(arg0);
-            return result;
-        }
-    }
-    async getClosedDates(): Promise<Array<string>> {
-        if (this.processError) {
-            try {
-                const result = await this.actor.getClosedDates();
-                return result;
-            } catch (e) {
-                this.processError(e);
-                throw new Error("unreachable");
-            }
-        } else {
-            const result = await this.actor.getClosedDates();
-            return result;
-        }
-    }
-    async getDailySheet(arg0: string): Promise<DailySheet | null> {
-        if (this.processError) {
-            try {
-                const result = await this.actor.getDailySheet(arg0);
+                const result = await this.actor.getNegativeEntries(arg0);
                 return from_candid_opt_n1(this._uploadFile, this._downloadFile, result);
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
-            const result = await this.actor.getDailySheet(arg0);
+            const result = await this.actor.getNegativeEntries(arg0);
             return from_candid_opt_n1(this._uploadFile, this._downloadFile, result);
         }
     }
-    async getDaysByStatus(arg0: boolean): Promise<Array<string>> {
+    async getProductName(arg0: bigint): Promise<string | null> {
         if (this.processError) {
             try {
-                const result = await this.actor.getDaysByStatus(arg0);
+                const result = await this.actor.getProductName(arg0);
+                return from_candid_opt_n2(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getProductName(arg0);
+            return from_candid_opt_n2(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async loadAllSheets(): Promise<Array<SheetEntry>> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.loadAllSheets();
+                return from_candid_vec_n3(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.loadAllSheets();
+            return from_candid_vec_n3(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async loadProductNames(): Promise<Array<ProductNameEntry>> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.loadProductNames();
                 return result;
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
-            const result = await this.actor.getDaysByStatus(arg0);
+            const result = await this.actor.loadProductNames();
             return result;
         }
     }
-    async getDiffForDay(arg0: string): Promise<Array<StockEntry>> {
+    async loadSheet(arg0: string): Promise<DailySheet | null> {
         if (this.processError) {
             try {
-                const result = await this.actor.getDiffForDay(arg0);
+                const result = await this.actor.loadSheet(arg0);
+                return from_candid_opt_n11(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.loadSheet(arg0);
+            return from_candid_opt_n11(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async lockSheet(arg0: string): Promise<boolean> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.lockSheet(arg0);
                 return result;
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
-            const result = await this.actor.getDiffForDay(arg0);
+            const result = await this.actor.lockSheet(arg0);
             return result;
         }
     }
-    async getOpeningStockForNewDay(arg0: string): Promise<Array<StockEntry>> {
+    async saveProductNames(arg0: Array<string>): Promise<void> {
         if (this.processError) {
             try {
-                const result = await this.actor.getOpeningStockForNewDay(arg0);
+                const result = await this.actor.saveProductNames(arg0);
                 return result;
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
-            const result = await this.actor.getOpeningStockForNewDay(arg0);
+            const result = await this.actor.saveProductNames(arg0);
             return result;
         }
     }
-    async getProducts(): Promise<Array<Product>> {
+    async saveSheet(arg0: DailySheet): Promise<void> {
         if (this.processError) {
             try {
-                const result = await this.actor.getProducts();
+                const result = await this.actor.saveSheet(to_candid_DailySheet_n12(this._uploadFile, this._downloadFile, arg0));
                 return result;
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
-            const result = await this.actor.getProducts();
-            return result;
-        }
-    }
-    async initializeProducts(): Promise<void> {
-        if (this.processError) {
-            try {
-                const result = await this.actor.initializeProducts();
-                return result;
-            } catch (e) {
-                this.processError(e);
-                throw new Error("unreachable");
-            }
-        } else {
-            const result = await this.actor.initializeProducts();
-            return result;
-        }
-    }
-    async saveSession(arg0: string, arg1: Session): Promise<void> {
-        if (this.processError) {
-            try {
-                const result = await this.actor.saveSession(arg0, arg1);
-                return result;
-            } catch (e) {
-                this.processError(e);
-                throw new Error("unreachable");
-            }
-        } else {
-            const result = await this.actor.saveSession(arg0, arg1);
+            const result = await this.actor.saveSheet(to_candid_DailySheet_n12(this._uploadFile, this._downloadFile, arg0));
             return result;
         }
     }
 }
-function from_candid_DailySheet_n2(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _DailySheet): DailySheet {
-    return from_candid_record_n3(_uploadFile, _downloadFile, value);
+function from_candid_DailySheet_n8(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _DailySheet): DailySheet {
+    return from_candid_record_n9(_uploadFile, _downloadFile, value);
 }
-function from_candid_opt_n1(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [_DailySheet]): DailySheet | null {
-    return value.length === 0 ? null : from_candid_DailySheet_n2(_uploadFile, _downloadFile, value[0]);
+function from_candid_SheetEntry_n4(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _SheetEntry): SheetEntry {
+    return from_candid_record_n5(_uploadFile, _downloadFile, value);
 }
-function from_candid_opt_n4(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [bigint]): bigint | null {
+function from_candid_SheetValue_n6(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _SheetValue): SheetValue {
+    return from_candid_record_n7(_uploadFile, _downloadFile, value);
+}
+function from_candid_opt_n1(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [Array<_NegativeEntry>]): Array<NegativeEntry> | null {
     return value.length === 0 ? null : value[0];
 }
-function from_candid_record_n3(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
-    date: string;
-    isClosed: boolean;
-    closedAt: [] | [bigint];
-    sessions: Array<_Session>;
+function from_candid_opt_n10(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [Array<_ReportRow>]): Array<ReportRow> | null {
+    return value.length === 0 ? null : value[0];
+}
+function from_candid_opt_n11(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [_DailySheet]): DailySheet | null {
+    return value.length === 0 ? null : from_candid_DailySheet_n8(_uploadFile, _downloadFile, value[0]);
+}
+function from_candid_opt_n2(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [string]): string | null {
+    return value.length === 0 ? null : value[0];
+}
+function from_candid_record_n5(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    key: _SheetKey;
+    value: _SheetValue;
 }): {
-    date: string;
-    isClosed: boolean;
-    closedAt?: bigint;
-    sessions: Array<Session>;
+    key: SheetKey;
+    value: SheetValue;
 } {
     return {
+        key: value.key,
+        value: from_candid_SheetValue_n6(_uploadFile, _downloadFile, value.value)
+    };
+}
+function from_candid_record_n7(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    sheet: _DailySheet;
+}): {
+    sheet: DailySheet;
+} {
+    return {
+        sheet: from_candid_DailySheet_n8(_uploadFile, _downloadFile, value.sheet)
+    };
+}
+function from_candid_record_n9(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    negativeEntries: Array<_NegativeEntry>;
+    date: string;
+    rows: Array<_ProductRow>;
+    locked: boolean;
+    negativeReasons: Array<[string, string]>;
+    finalizedReport: [] | [Array<_ReportRow>];
+}): {
+    negativeEntries: Array<NegativeEntry>;
+    date: string;
+    rows: Array<ProductRow>;
+    locked: boolean;
+    negativeReasons: Array<[string, string]>;
+    finalizedReport?: Array<ReportRow>;
+} {
+    return {
+        negativeEntries: value.negativeEntries,
         date: value.date,
-        isClosed: value.isClosed,
-        closedAt: record_opt_to_undefined(from_candid_opt_n4(_uploadFile, _downloadFile, value.closedAt)),
-        sessions: value.sessions
+        rows: value.rows,
+        locked: value.locked,
+        negativeReasons: value.negativeReasons,
+        finalizedReport: record_opt_to_undefined(from_candid_opt_n10(_uploadFile, _downloadFile, value.finalizedReport))
+    };
+}
+function from_candid_vec_n3(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: Array<_SheetEntry>): Array<SheetEntry> {
+    return value.map((x)=>from_candid_SheetEntry_n4(_uploadFile, _downloadFile, x));
+}
+function to_candid_DailySheet_n12(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: DailySheet): _DailySheet {
+    return to_candid_record_n13(_uploadFile, _downloadFile, value);
+}
+function to_candid_record_n13(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    negativeEntries: Array<NegativeEntry>;
+    date: string;
+    rows: Array<ProductRow>;
+    locked: boolean;
+    negativeReasons: Array<[string, string]>;
+    finalizedReport?: Array<ReportRow>;
+}): {
+    negativeEntries: Array<_NegativeEntry>;
+    date: string;
+    rows: Array<_ProductRow>;
+    locked: boolean;
+    negativeReasons: Array<[string, string]>;
+    finalizedReport: [] | [Array<_ReportRow>];
+} {
+    return {
+        negativeEntries: value.negativeEntries,
+        date: value.date,
+        rows: value.rows,
+        locked: value.locked,
+        negativeReasons: value.negativeReasons,
+        finalizedReport: value.finalizedReport ? candid_some(value.finalizedReport) : candid_none()
     };
 }
 export interface CreateActorOptions {

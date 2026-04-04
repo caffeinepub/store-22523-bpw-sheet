@@ -11,35 +11,55 @@ import type { IDL } from '@icp-sdk/core/candid';
 import type { Principal } from '@icp-sdk/core/principal';
 
 export interface DailySheet {
+  'negativeEntries' : Array<NegativeEntry>,
   'date' : string,
-  'isClosed' : boolean,
-  'closedAt' : [] | [bigint],
-  'sessions' : Array<Session>,
+  'rows' : Array<ProductRow>,
+  'locked' : boolean,
+  'negativeReasons' : Array<[string, string]>,
+  'finalizedReport' : [] | [Array<ReportRow>],
 }
-export interface Product { 'id' : bigint, 'name' : string, 'unit' : string }
-export interface Session {
-  'sessionType' : string,
-  'entries' : Array<StockEntry>,
-  'savedAt' : bigint,
+export interface NegativeEntry {
+  'entryType' : string,
+  'cellIndex' : bigint,
+  'quantity' : number,
+  'productIndex' : bigint,
+  'reason' : string,
 }
-export interface StockEntry {
-  'receivedQty' : number,
-  'productId' : bigint,
-  'actualClosing' : number,
-  'soldQty' : number,
-  'openingStock' : number,
+export interface ProductNameEntry {
+  'key' : ProductNameKey,
+  'value' : ProductNameValue,
 }
+export interface ProductNameKey { 'index' : bigint }
+export interface ProductNameValue { 'name' : string }
+export interface ProductRow {
+  'opening' : number,
+  'productName' : string,
+  'delivery' : number,
+  'transferCells' : Array<number>,
+  'openCounter' : number,
+  'additional' : number,
+  'physical' : number,
+  'transfer' : number,
+  'posCount' : number,
+  'deliveryCells' : Array<number>,
+}
+export interface ReportRow {
+  'status' : string,
+  'reportLabel' : string,
+  'variance' : number,
+}
+export interface SheetEntry { 'key' : SheetKey, 'value' : SheetValue }
+export interface SheetKey { 'date' : string }
+export interface SheetValue { 'sheet' : DailySheet }
 export interface _SERVICE {
-  'closeDay' : ActorMethod<[string], undefined>,
-  'getAllStockForDay' : ActorMethod<[string], Array<StockEntry>>,
-  'getClosedDates' : ActorMethod<[], Array<string>>,
-  'getDailySheet' : ActorMethod<[string], [] | [DailySheet]>,
-  'getDaysByStatus' : ActorMethod<[boolean], Array<string>>,
-  'getDiffForDay' : ActorMethod<[string], Array<StockEntry>>,
-  'getOpeningStockForNewDay' : ActorMethod<[string], Array<StockEntry>>,
-  'getProducts' : ActorMethod<[], Array<Product>>,
-  'initializeProducts' : ActorMethod<[], undefined>,
-  'saveSession' : ActorMethod<[string, Session], undefined>,
+  'getNegativeEntries' : ActorMethod<[string], [] | [Array<NegativeEntry>]>,
+  'getProductName' : ActorMethod<[bigint], [] | [string]>,
+  'loadAllSheets' : ActorMethod<[], Array<SheetEntry>>,
+  'loadProductNames' : ActorMethod<[], Array<ProductNameEntry>>,
+  'loadSheet' : ActorMethod<[string], [] | [DailySheet]>,
+  'lockSheet' : ActorMethod<[string], boolean>,
+  'saveProductNames' : ActorMethod<[Array<string>], undefined>,
+  'saveSheet' : ActorMethod<[DailySheet], undefined>,
 }
 export declare const idlService: IDL.ServiceClass;
 export declare const idlInitArgs: IDL.Type[];

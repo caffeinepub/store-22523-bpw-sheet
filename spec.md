@@ -1,43 +1,60 @@
-# Store 22523 BPW Sheet
+# Store 22523 BPW Daily Sheet
 
 ## Current State
-The app is a fully functional inventory daily sheet with:
-- 13-column layout: Product Name, Opening, Delivery, Transfer, Total BA, Open Counter, Physical, Additional, Total Counter, Store Closing, POS Count, Variance
-- Manual entry directly in SheetTable cells for Delivery, Transfer, Physical, Additional, POS Count
-- Sticky header with Calendar, Run Report, Default Qty Set, Admin Edit, Reset Day, Admin Reset, Close Day buttons
-- Sheet locking (day close), Admin Edit unlock, Reset Day, Admin Reset dialogs
-- Run Report pop-up with category-based variance/status and finalized report below sheet
-- Product name inline editing, calendar slicer overlay
+All data (daily sheets, product names, locked status, delivery/transfer entries, finalized reports, negative entry reasons) is stored in browser localStorage. This means data is device-specific -- changes on one device are never visible on another. The app is a PWA used on multiple devices by multiple staff members.
+
+Key localStorage keys:
+- `bpw_sheets`: Array of DailySheet objects (full sheet data per date)
+- `bpw_product_names`: Array of 22 product name strings
+- `pwa-banner-dismissed`: UI-only flag (can stay in localStorage)
+
+The data model in use (sheetStorage.ts):
+- `DailySheet`: date, rows[], locked, finalizedReport?, negativeReasons?, negativeEntries?
+- `ProductRow`: productName, opening, delivery, deliveryCells[3], transfer, transferCells[3], openCounter, physical, additional, posCount
+- `FinalizedReportRow`: label, variance, status
+- `NegativeEntry`: type, productIdx, cellIdx, qty, reason
 
 ## Requested Changes (Diff)
 
 ### Add
-- **Delivery Window button**: A small clickable button/icon in the Delivery column header (or near it) that opens a dedicated modal for entering delivery quantities. The modal lists all product names with a number input next to each. The modal pre-fills with current delivery values so existing entries are visible. Saving the modal writes all values back to the sheet. The modal is disabled (view-only or not openable) when the day is locked; it can be re-opened via Admin Edit.
-- **Transfer Window button**: Same pattern as Delivery Window but for the Transfer column.
-- Both windows should clearly show the product name and a qty input field for each product.
-- Both windows should have a Save button to commit entries and a Cancel button to discard changes.
-- When re-opened on the same day, the entered values must be visible and editable.
-- When the day is locked, the window is read-only (open but inputs disabled) OR the button is disabled.
-- Admin Edit unlocking the day re-enables the windows.
+- Backend Motoko canister with stable storage for all BPW sheet data
+- Backend API functions to CRUD sheets, product names, and all related data
+- Frontend backend API integration layer replacing localStorage calls
+- Loading states while data is being fetched from the canister
 
 ### Modify
-- `SheetTable.tsx`: Add a small "open window" icon button in the Delivery and Transfer column headers to trigger the respective modal.
-- `BPWSheet.tsx`: Add state and handlers for Delivery Window and Transfer Window modals; wire them to save entries back to the sheet rows.
+- `sheetStorage.ts`: Replace localStorage read/write functions with backend canister calls
+- `BPWSheet.tsx`: All save/load operations switch from localStorage to backend API calls
+- Data is now shared: any device opening the app reads the same canister state
 
 ### Remove
-- Nothing removed.
+- `localStorage.getItem/setItem` calls for sheet and product data (keep only `pwa-banner-dismissed`)
 
 ## Implementation Plan
-1. In `BPWSheet.tsx`:
-   - Add `showDeliveryWindow` and `showTransferWindow` state booleans.
-   - Add draft state arrays for delivery and transfer qty values (pre-filled from current sheet rows).
-   - Add handlers: `openDeliveryWindow`, `openTransferWindow`, `saveDeliveryWindow`, `saveTransferWindow`.
-   - Render two new Dialog components: Delivery Entry Window and Transfer Entry Window.
-   - Each dialog lists all product names with a number input per row.
-   - On Save: update all delivery (or transfer) values in `sheet.rows`, persist to localStorage.
-   - On Cancel: discard draft changes.
-   - If day is locked: show dialog in read-only mode (inputs disabled, Save button hidden, just a Close button).
-2. In `SheetTable.tsx`:
-   - Add `onOpenDeliveryWindow` and `onOpenTransferWindow` optional callback props.
-   - Add a small icon button (e.g., `ExternalLink` or `LayoutList` icon) in the Delivery and Transfer column headers that calls the respective callback.
-   - Button is hidden or disabled if `locked` is true (matching the sheet's locked state).
+
+### Backend (Motoko)
+Create a new main.mo with stable storage for:
+1. `stableSheets`: stable HashMap<Text, DailySheet> keyed by date string (YYYY-MM-DD)
+2. `stableProductNames`: stable Array<Text> of 22 product names
+
+Data types matching frontend exactly:
+- `ProductRow`: productName, opening, delivery, deliveryCells([3] of Float), transfer, transferCells([3] of Float), openCounter, physical, additional, posCount
+- `FinalizedReportRow`: label, variance, status
+- `NegativeEntry`: type ("delivery"/"transfer"), productIdx, cellIdx, qty, reason
+- `DailySheet`: date, rows, locked, finalizedReport (optional), negativeReasons (as [(Text,Text)]), negativeEntries (optional)
+
+API functions:
+- `saveSheet(sheet: DailySheet): async ()` -- upsert a sheet
+- `loadSheet(date: Text): async ?DailySheet` -- get sheet by date
+- `loadAllSheets(): async [DailySheet]` -- get all sheets
+- `saveProductNames(names: [Text]): async ()` -- save product name list
+- `loadProductNames(): async [Text]` -- get product names
+
+### Frontend
+- Create `src/frontend/src/lib/backendStorage.ts` -- async wrappers matching the current sync sheetStorage API, but calling the backend canister
+- Update `BPWSheet.tsx` to:
+  - Use async functions for all data access (useEffect with await, or loading states)
+  - Show a loading spinner while data loads from canister on mount
+  - All save operations call backend
+- Product name changes persist to backend immediately
+- Keep `pwa-banner-dismissed` in localStorage (UI-only, per-device preference is fine)

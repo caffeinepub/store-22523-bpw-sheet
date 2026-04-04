@@ -8,93 +8,124 @@
 
 import { IDL } from '@icp-sdk/core/candid';
 
-export const StockEntry = IDL.Record({
-  'receivedQty' : IDL.Float64,
-  'productId' : IDL.Nat,
-  'actualClosing' : IDL.Float64,
-  'soldQty' : IDL.Float64,
-  'openingStock' : IDL.Float64,
+export const NegativeEntry = IDL.Record({
+  'entryType' : IDL.Text,
+  'cellIndex' : IDL.Nat,
+  'quantity' : IDL.Float64,
+  'productIndex' : IDL.Nat,
+  'reason' : IDL.Text,
 });
-export const Session = IDL.Record({
-  'sessionType' : IDL.Text,
-  'entries' : IDL.Vec(StockEntry),
-  'savedAt' : IDL.Int,
+export const SheetKey = IDL.Record({ 'date' : IDL.Text });
+export const ProductRow = IDL.Record({
+  'opening' : IDL.Float64,
+  'productName' : IDL.Text,
+  'delivery' : IDL.Float64,
+  'transferCells' : IDL.Vec(IDL.Float64),
+  'openCounter' : IDL.Float64,
+  'additional' : IDL.Float64,
+  'physical' : IDL.Float64,
+  'transfer' : IDL.Float64,
+  'posCount' : IDL.Float64,
+  'deliveryCells' : IDL.Vec(IDL.Float64),
+});
+export const ReportRow = IDL.Record({
+  'status' : IDL.Text,
+  'reportLabel' : IDL.Text,
+  'variance' : IDL.Float64,
 });
 export const DailySheet = IDL.Record({
+  'negativeEntries' : IDL.Vec(NegativeEntry),
   'date' : IDL.Text,
-  'isClosed' : IDL.Bool,
-  'closedAt' : IDL.Opt(IDL.Int),
-  'sessions' : IDL.Vec(Session),
+  'rows' : IDL.Vec(ProductRow),
+  'locked' : IDL.Bool,
+  'negativeReasons' : IDL.Vec(IDL.Tuple(IDL.Text, IDL.Text)),
+  'finalizedReport' : IDL.Opt(IDL.Vec(ReportRow)),
 });
-export const Product = IDL.Record({
-  'id' : IDL.Nat,
-  'name' : IDL.Text,
-  'unit' : IDL.Text,
+export const SheetValue = IDL.Record({ 'sheet' : DailySheet });
+export const SheetEntry = IDL.Record({
+  'key' : SheetKey,
+  'value' : SheetValue,
+});
+export const ProductNameKey = IDL.Record({ 'index' : IDL.Nat });
+export const ProductNameValue = IDL.Record({ 'name' : IDL.Text });
+export const ProductNameEntry = IDL.Record({
+  'key' : ProductNameKey,
+  'value' : ProductNameValue,
 });
 
 export const idlService = IDL.Service({
-  'closeDay' : IDL.Func([IDL.Text], [], []),
-  'getAllStockForDay' : IDL.Func([IDL.Text], [IDL.Vec(StockEntry)], ['query']),
-  'getClosedDates' : IDL.Func([], [IDL.Vec(IDL.Text)], ['query']),
-  'getDailySheet' : IDL.Func([IDL.Text], [IDL.Opt(DailySheet)], ['query']),
-  'getDaysByStatus' : IDL.Func([IDL.Bool], [IDL.Vec(IDL.Text)], ['query']),
-  'getDiffForDay' : IDL.Func([IDL.Text], [IDL.Vec(StockEntry)], ['query']),
-  'getOpeningStockForNewDay' : IDL.Func(
+  'getNegativeEntries' : IDL.Func(
       [IDL.Text],
-      [IDL.Vec(StockEntry)],
+      [IDL.Opt(IDL.Vec(NegativeEntry))],
       ['query'],
     ),
-  'getProducts' : IDL.Func([], [IDL.Vec(Product)], ['query']),
-  'initializeProducts' : IDL.Func([], [], []),
-  'saveSession' : IDL.Func([IDL.Text, Session], [], []),
+  'getProductName' : IDL.Func([IDL.Nat], [IDL.Opt(IDL.Text)], ['query']),
+  'loadAllSheets' : IDL.Func([], [IDL.Vec(SheetEntry)], ['query']),
+  'loadProductNames' : IDL.Func([], [IDL.Vec(ProductNameEntry)], ['query']),
+  'loadSheet' : IDL.Func([IDL.Text], [IDL.Opt(DailySheet)], ['query']),
+  'lockSheet' : IDL.Func([IDL.Text], [IDL.Bool], []),
+  'saveProductNames' : IDL.Func([IDL.Vec(IDL.Text)], [], []),
+  'saveSheet' : IDL.Func([DailySheet], [], []),
 });
 
 export const idlInitArgs = [];
 
 export const idlFactory = ({ IDL }) => {
-  const StockEntry = IDL.Record({
-    'receivedQty' : IDL.Float64,
-    'productId' : IDL.Nat,
-    'actualClosing' : IDL.Float64,
-    'soldQty' : IDL.Float64,
-    'openingStock' : IDL.Float64,
+  const NegativeEntry = IDL.Record({
+    'entryType' : IDL.Text,
+    'cellIndex' : IDL.Nat,
+    'quantity' : IDL.Float64,
+    'productIndex' : IDL.Nat,
+    'reason' : IDL.Text,
   });
-  const Session = IDL.Record({
-    'sessionType' : IDL.Text,
-    'entries' : IDL.Vec(StockEntry),
-    'savedAt' : IDL.Int,
+  const SheetKey = IDL.Record({ 'date' : IDL.Text });
+  const ProductRow = IDL.Record({
+    'opening' : IDL.Float64,
+    'productName' : IDL.Text,
+    'delivery' : IDL.Float64,
+    'transferCells' : IDL.Vec(IDL.Float64),
+    'openCounter' : IDL.Float64,
+    'additional' : IDL.Float64,
+    'physical' : IDL.Float64,
+    'transfer' : IDL.Float64,
+    'posCount' : IDL.Float64,
+    'deliveryCells' : IDL.Vec(IDL.Float64),
+  });
+  const ReportRow = IDL.Record({
+    'status' : IDL.Text,
+    'reportLabel' : IDL.Text,
+    'variance' : IDL.Float64,
   });
   const DailySheet = IDL.Record({
+    'negativeEntries' : IDL.Vec(NegativeEntry),
     'date' : IDL.Text,
-    'isClosed' : IDL.Bool,
-    'closedAt' : IDL.Opt(IDL.Int),
-    'sessions' : IDL.Vec(Session),
+    'rows' : IDL.Vec(ProductRow),
+    'locked' : IDL.Bool,
+    'negativeReasons' : IDL.Vec(IDL.Tuple(IDL.Text, IDL.Text)),
+    'finalizedReport' : IDL.Opt(IDL.Vec(ReportRow)),
   });
-  const Product = IDL.Record({
-    'id' : IDL.Nat,
-    'name' : IDL.Text,
-    'unit' : IDL.Text,
+  const SheetValue = IDL.Record({ 'sheet' : DailySheet });
+  const SheetEntry = IDL.Record({ 'key' : SheetKey, 'value' : SheetValue });
+  const ProductNameKey = IDL.Record({ 'index' : IDL.Nat });
+  const ProductNameValue = IDL.Record({ 'name' : IDL.Text });
+  const ProductNameEntry = IDL.Record({
+    'key' : ProductNameKey,
+    'value' : ProductNameValue,
   });
   
   return IDL.Service({
-    'closeDay' : IDL.Func([IDL.Text], [], []),
-    'getAllStockForDay' : IDL.Func(
+    'getNegativeEntries' : IDL.Func(
         [IDL.Text],
-        [IDL.Vec(StockEntry)],
+        [IDL.Opt(IDL.Vec(NegativeEntry))],
         ['query'],
       ),
-    'getClosedDates' : IDL.Func([], [IDL.Vec(IDL.Text)], ['query']),
-    'getDailySheet' : IDL.Func([IDL.Text], [IDL.Opt(DailySheet)], ['query']),
-    'getDaysByStatus' : IDL.Func([IDL.Bool], [IDL.Vec(IDL.Text)], ['query']),
-    'getDiffForDay' : IDL.Func([IDL.Text], [IDL.Vec(StockEntry)], ['query']),
-    'getOpeningStockForNewDay' : IDL.Func(
-        [IDL.Text],
-        [IDL.Vec(StockEntry)],
-        ['query'],
-      ),
-    'getProducts' : IDL.Func([], [IDL.Vec(Product)], ['query']),
-    'initializeProducts' : IDL.Func([], [], []),
-    'saveSession' : IDL.Func([IDL.Text, Session], [], []),
+    'getProductName' : IDL.Func([IDL.Nat], [IDL.Opt(IDL.Text)], ['query']),
+    'loadAllSheets' : IDL.Func([], [IDL.Vec(SheetEntry)], ['query']),
+    'loadProductNames' : IDL.Func([], [IDL.Vec(ProductNameEntry)], ['query']),
+    'loadSheet' : IDL.Func([IDL.Text], [IDL.Opt(DailySheet)], ['query']),
+    'lockSheet' : IDL.Func([IDL.Text], [IDL.Bool], []),
+    'saveProductNames' : IDL.Func([IDL.Vec(IDL.Text)], [], []),
+    'saveSheet' : IDL.Func([DailySheet], [], []),
   });
 };
 
