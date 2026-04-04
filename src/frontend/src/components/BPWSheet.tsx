@@ -208,9 +208,9 @@ export default function BPWSheet() {
     })),
     locked: false,
   }));
-  const [syncStatus, setSyncStatus] = useState<"syncing" | "live" | "error">(
-    "syncing",
-  );
+  const [syncStatus, setSyncStatus] = useState<
+    "syncing" | "live" | "error" | "load-error"
+  >("syncing");
   const [allDates, setAllDates] = useState<string[]>([]);
   const [lockedDates, setLockedDates] = useState<string[]>([]);
   const [showCloseDialog, setShowCloseDialog] = useState(false);
@@ -328,7 +328,7 @@ export default function BPWSheet() {
         console.error("Failed to load sheet:", err);
         // Silently fall back — sheet already shows from default state
         if (!cancelled) {
-          setSyncStatus("error");
+          setSyncStatus("load-error");
         }
       }
     })();
@@ -1081,7 +1081,7 @@ export default function BPWSheet() {
               </h1>
               <div className="flex items-center gap-1 mt-0.5">
                 <p className="text-white/60 text-[9px]">
-                  BPW Daily Sheet · v28
+                  BPW Daily Sheet · v36
                 </p>
                 <span
                   className={cn(
@@ -1089,12 +1089,14 @@ export default function BPWSheet() {
                     syncStatus === "syncing" && "bg-yellow-400 animate-pulse",
                     syncStatus === "live" && "bg-green-400",
                     syncStatus === "error" && "bg-red-400",
+                    syncStatus === "load-error" && "bg-orange-400",
                   )}
                 />
                 <span className="text-[8px] text-white/50 hidden sm:inline">
                   {syncStatus === "syncing" && "Syncing..."}
                   {syncStatus === "live" && "Live"}
                   {syncStatus === "error" && "Save Error"}
+                  {syncStatus === "load-error" && "Offline"}
                 </span>
               </div>
             </div>
