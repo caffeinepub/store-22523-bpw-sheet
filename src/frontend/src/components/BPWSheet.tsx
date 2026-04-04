@@ -190,7 +190,7 @@ export default function BPWSheet() {
     })),
     locked: false,
   }));
-  const [syncStatus, setSyncStatus] = useState<"syncing" | "synced" | "error">(
+  const [_syncStatus, setSyncStatus] = useState<"syncing" | "synced" | "error">(
     "syncing",
   );
   const [allDates, setAllDates] = useState<string[]>([]);
@@ -869,27 +869,9 @@ export default function BPWSheet() {
             <h1 className="text-white font-bold text-sm leading-none">
               Store 22523
             </h1>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <p className="text-white/60 text-[10px]">BPW Daily Sheet · v18</p>
-              {syncStatus === "syncing" && (
-                <span className="flex items-center gap-0.5 text-[9px] text-yellow-300">
-                  <span className="w-1.5 h-1.5 bg-yellow-300 rounded-full animate-pulse" />
-                  Syncing
-                </span>
-              )}
-              {syncStatus === "synced" && (
-                <span className="flex items-center gap-0.5 text-[9px] text-green-300">
-                  <span className="w-1.5 h-1.5 bg-green-300 rounded-full" />
-                  Live
-                </span>
-              )}
-              {syncStatus === "error" && (
-                <span className="flex items-center gap-0.5 text-[9px] text-red-300">
-                  <span className="w-1.5 h-1.5 bg-red-300 rounded-full" />
-                  Offline
-                </span>
-              )}
-            </div>
+            <p className="text-white/60 text-[10px] mt-0.5">
+              BPW Daily Sheet · v24
+            </p>
           </div>
         </div>
 
