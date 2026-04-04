@@ -174,7 +174,25 @@ function formatVariance(v: number): string {
 
 export default function BPWSheet() {
   const [selectedDate, setSelectedDate] = useState<string>(todayKey());
-  const [sheet, setSheet] = useState<DailySheet | null>(null);
+  const [sheet, setSheet] = useState<DailySheet | null>(() => ({
+    date: todayKey(),
+    rows: DEFAULT_PRODUCTS.map((name) => ({
+      productName: name,
+      opening: 0,
+      delivery: 0,
+      deliveryCells: [0, 0, 0] as [number, number, number],
+      transfer: 0,
+      transferCells: [0, 0, 0] as [number, number, number],
+      openCounter: 0,
+      physical: 0,
+      additional: 0,
+      posCount: 0,
+    })),
+    locked: false,
+  }));
+  const [syncStatus, setSyncStatus] = useState<"syncing" | "synced" | "error">(
+    "syncing",
+  );
   const [allDates, setAllDates] = useState<string[]>([]);
   const [lockedDates, setLockedDates] = useState<string[]>([]);
   const [showCloseDialog, setShowCloseDialog] = useState(false);
@@ -250,9 +268,13 @@ export default function BPWSheet() {
   // Sheet renders immediately with defaults; backend data updates it silently.
   // biome-ignore lint/correctness/useExhaustiveDependencies: productNames is stable after first load
   useEffect(() => {
-    if (!actor || actorFetching) return;
+    if (!actor || actorFetching) {
+      if (actorFetching) setSyncStatus("syncing");
+      return;
+    }
     let cancelled = false;
     (async () => {
+      setSyncStatus("syncing");
       try {
         // Load product names and current sheet in parallel
         const [names, allSheets, sheet] = await Promise.all([
@@ -267,12 +289,14 @@ export default function BPWSheet() {
             allSheets.filter((sh) => sh.locked).map((sh) => sh.date),
           );
           setSheet(sheet);
+          setSyncStatus("synced");
         }
       } catch (err) {
         console.error("Failed to load sheet:", err);
         // Don't block the sheet -- just show a toast
         if (!cancelled) {
           toast.error("Could not reach server. Using local defaults.");
+          setSyncStatus("error");
           // Ensure sheet shows something usable even if server fails
           setSheet(
             (prev) =>
@@ -845,9 +869,27 @@ export default function BPWSheet() {
             <h1 className="text-white font-bold text-sm leading-none">
               Store 22523
             </h1>
-            <p className="text-white/60 text-[10px] mt-0.5">
-              BPW Daily Sheet · v18
-            </p>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <p className="text-white/60 text-[10px]">BPW Daily Sheet · v18</p>
+              {syncStatus === "syncing" && (
+                <span className="flex items-center gap-0.5 text-[9px] text-yellow-300">
+                  <span className="w-1.5 h-1.5 bg-yellow-300 rounded-full animate-pulse" />
+                  Syncing
+                </span>
+              )}
+              {syncStatus === "synced" && (
+                <span className="flex items-center gap-0.5 text-[9px] text-green-300">
+                  <span className="w-1.5 h-1.5 bg-green-300 rounded-full" />
+                  Live
+                </span>
+              )}
+              {syncStatus === "error" && (
+                <span className="flex items-center gap-0.5 text-[9px] text-red-300">
+                  <span className="w-1.5 h-1.5 bg-red-300 rounded-full" />
+                  Offline
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
