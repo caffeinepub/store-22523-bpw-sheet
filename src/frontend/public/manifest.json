@@ -1,7 +1,7 @@
 {
-  "name": "38517 BPW",
-  "short_name": "38517 BPW",
-  "description": "BPW Daily Inventory Sheet for Store 38517",
+  "name": "22523 BPW",
+  "short_name": "22523 BPW",
+  "description": "BPW Daily Inventory Sheet for Store 22523",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#1e2a3a",
@@ -9,13 +9,13 @@
   "orientation": "any",
   "icons": [
     {
-      "src": "/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png",
+      "src": "/assets/store-logo.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png",
+      "src": "/assets/store-logo.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"

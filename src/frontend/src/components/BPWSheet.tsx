@@ -599,7 +599,7 @@ export default function BPWSheet() {
   const handleResetDay = useCallback(async () => {
     if (!sheet || sheet.locked) return;
 
-    if (resetPassword !== "385171") {
+    if (resetPassword !== "225231") {
       setResetPasswordError(true);
       return;
     }
@@ -1026,13 +1026,13 @@ export default function BPWSheet() {
         >
           <div className="flex items-center gap-3 min-w-0">
             <img
-              src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
-              alt="38517 BPW"
+              src="/assets/store-logo.png"
+              alt="22523 BPW"
               className="w-8 h-8 object-contain rounded shrink-0"
               style={{ background: "rgba(255,255,255,0.1)" }}
             />
             <div className="min-w-0">
-              <span className="font-bold mr-2">38517 BPW</span>
+              <span className="font-bold mr-2">22523 BPW</span>
               {isIOS ? (
                 <span className="text-white/80 text-xs">
                   To install: tap the share icon and select &apos;Add to Home
@@ -1099,14 +1099,14 @@ export default function BPWSheet() {
               <span className="hidden sm:inline">Calendar</span>
             </Button>
             <img
-              src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
-              alt="38517 BPW Logo"
+              src="/assets/store-logo.png"
+              alt="22523 BPW Logo"
               className="w-7 h-7 object-contain rounded shrink-0"
               style={{ background: "rgba(255,255,255,0.1)" }}
             />
             <div className="min-w-0">
               <h1 className="text-white font-bold text-xs leading-none">
-                Store 38517
+                Store 22523
               </h1>
               <div className="flex items-center gap-1 mt-0.5">
                 <p className="text-white/60 text-[9px]">BPW Daily Sheet · v1</p>
@@ -1517,13 +1517,13 @@ export default function BPWSheet() {
           <div className="print-only mb-4">
             <div className="flex items-center gap-3 mb-2">
               <img
-                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
-                alt="38517 BPW"
+                src="/assets/store-logo.png"
+                alt="22523 BPW"
                 className="w-12 h-12 object-contain"
               />
               <div>
                 <h2 className="text-lg font-bold">
-                  Store 38517 — BPW Daily Sheet
+                  Store 22523 — BPW Daily Sheet
                 </h2>
                 <p className="text-sm text-gray-600">
                   {formatLongDate(selectedDate)}
@@ -1619,8 +1619,8 @@ export default function BPWSheet() {
                 {/* Print-only header for this section */}
                 <div className="print-only px-4 py-3 border-b border-gray-200 flex items-center gap-3">
                   <img
-                    src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
-                    alt="38517 BPW"
+                    src="/assets/store-logo.png"
+                    alt="22523 BPW"
                     className="w-10 h-10 object-contain"
                   />
                   <div>
@@ -1628,7 +1628,7 @@ export default function BPWSheet() {
                       Category Report — {formatLongDate(selectedDate)}
                     </h3>
                     <p className="text-xs text-gray-500">
-                      Store 38517 · BPW Daily Sheet · Finalized
+                      Store 22523 · BPW Daily Sheet · Finalized
                     </p>
                   </div>
                 </div>
@@ -1794,7 +1794,7 @@ export default function BPWSheet() {
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
                   <img
-                    src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                    src="/assets/store-logo.png"
                     alt=""
                     className="w-6 h-6 object-contain opacity-80"
                   />
@@ -1892,7 +1892,7 @@ export default function BPWSheet() {
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
                   <img
-                    src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                    src="/assets/store-logo.png"
                     alt=""
                     className="w-6 h-6 object-contain opacity-80"
                   />
@@ -1975,7 +1975,7 @@ export default function BPWSheet() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <img
-                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                src="/assets/store-logo.png"
                 alt=""
                 className="w-6 h-6 object-contain opacity-80"
               />
@@ -2024,7 +2024,7 @@ export default function BPWSheet() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <img
-                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                src="/assets/store-logo.png"
                 alt=""
                 className="w-6 h-6 object-contain opacity-80"
               />
@@ -2108,7 +2108,7 @@ export default function BPWSheet() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <img
-                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                src="/assets/store-logo.png"
                 alt=""
                 className="w-6 h-6 object-contain opacity-80"
               />
@@ -2193,7 +2193,7 @@ export default function BPWSheet() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <img
-                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                src="/assets/store-logo.png"
                 alt=""
                 className="w-6 h-6 object-contain opacity-80"
               />
@@ -2270,7 +2270,7 @@ export default function BPWSheet() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <img
-                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                src="/assets/store-logo.png"
                 alt=""
                 className="w-6 h-6 object-contain opacity-80"
               />
@@ -2323,7 +2323,7 @@ export default function BPWSheet() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-red-600">
               <img
-                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                src="/assets/store-logo.png"
                 alt=""
                 className="w-6 h-6 object-contain opacity-80"
               />
@@ -2396,7 +2396,7 @@ export default function BPWSheet() {
           <DialogHeader className="px-5 pt-5 pb-3 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <img
-                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                src="/assets/store-logo.png"
                 alt=""
                 className="w-6 h-6 object-contain opacity-80"
               />
@@ -2597,7 +2597,7 @@ export default function BPWSheet() {
           <DialogHeader className="px-5 pt-5 pb-3 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <img
-                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                src="/assets/store-logo.png"
                 alt=""
                 className="w-6 h-6 object-contain opacity-80"
               />
@@ -2798,7 +2798,7 @@ export default function BPWSheet() {
           <DialogHeader className="px-5 pt-5 pb-3 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <img
-                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                src="/assets/store-logo.png"
                 alt=""
                 className="w-6 h-6 object-contain opacity-80"
               />
@@ -2922,7 +2922,7 @@ export default function BPWSheet() {
           <DialogHeader className="px-5 pt-5 pb-3 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <img
-                src="/assets/s_logo_transparent-019d5459-8b2e-75da-8df6-82f8ce38593e.png"
+                src="/assets/store-logo.png"
                 alt=""
                 className="w-6 h-6 object-contain opacity-80"
               />

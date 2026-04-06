@@ -297,8 +297,8 @@ const PRODUCT_STATIC: Record<
 };
 
 // Branch-level static data
-const BRANCH_NAME = "38517";
-const BRANCH_CODE = "38517";
+const BRANCH_NAME = "22523";
+const BRANCH_CODE = "22523";
 
 // ---------- CSV helpers ----------
 
