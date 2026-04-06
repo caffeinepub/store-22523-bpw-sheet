@@ -55,7 +55,7 @@ export const PRODUCTS = DEFAULT_PRODUCTS;
 
 export interface ProductRow {
   productName: string;
-  opening: number; // locked, carry-forward from previous Store Closing
+  opening: number; // locked, carry-forward from previous Total BA
   delivery: number; // manual – sum of deliveryCells
   deliveryCells: [number, number, number]; // three individual delivery entries
   transfer: number; // manual – sum of transferCells
@@ -187,9 +187,8 @@ export function getOrCreateSheet(
       if (prevRow) {
         const prevTotalBA = calcTotalBA(prevRow);
         const prevTotalCounter = calcTotalCounter(prevRow);
-        // Opening = previous Store Closing = Total BA + Total Counter
-        const prevStoreClosing = prevTotalBA + prevTotalCounter;
-        return emptyRow(name, prevStoreClosing, prevTotalCounter);
+        // Opening = previous Total BA (not Store Closing)
+        return emptyRow(name, prevTotalBA, prevTotalCounter);
       }
     }
     return emptyRow(name, 0, 0);

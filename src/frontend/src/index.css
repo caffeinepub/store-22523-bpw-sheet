@@ -263,8 +263,8 @@ input[type="number"] {
 }
 
 @media print {
-  img[alt="22523 BPW Logo"],
-  img[alt="22523 BPW"],
+  img[alt="38517 BPW Logo"],
+  img[alt="38517 BPW"],
   img[alt=""] {
     display: block !important;
     -webkit-print-color-adjust: exact;

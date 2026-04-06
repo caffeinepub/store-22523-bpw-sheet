@@ -1,5 +1,5 @@
-// Service Worker for 22523 BPW PWA
-const CACHE_NAME = '22523-bpw-v1';
+// Service Worker for 38517 BPW PWA
+const CACHE_NAME = '38517-bpw-v1';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

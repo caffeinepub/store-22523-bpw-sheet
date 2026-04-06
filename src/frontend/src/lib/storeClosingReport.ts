@@ -297,8 +297,8 @@ const PRODUCT_STATIC: Record<
 };
 
 // Branch-level static data
-const BRANCH_NAME = "22523-2-0-Dipen Patel";
-const BRANCH_CODE = "22523-2-0";
+const BRANCH_NAME = "38517";
+const BRANCH_CODE = "38517";
 
 // ---------- CSV helpers ----------
 
